@@ -2,9 +2,6 @@ package com.aengix.hopper.model
 
 import android.content.Context
 import kotlinx.serialization.Serializable
-import kotlinx.serialization.json.Json
-import java.io.BufferedReader
-import java.io.InputStreamReader
 
 @Serializable
 data class VersionManifest(
@@ -21,24 +18,17 @@ data class ServerVersionInfo(
 )
 
 object HopVersion {
-    lateinit var manifest: VersionManifest
-        private set
+    const val minServerVersion = "2.0.0"
+    const val protocolVersion = 2
 
-    private val json = Json { ignoreUnknownKeys = true }
+    fun appVersion(context: Context): String = HopConstants.appVersion(context)
 
-    fun init(context: Context) {
-        manifest = loadManifest(context)
-    }
-
-    private fun loadManifest(context: Context): VersionManifest {
-        val fallback = VersionManifest("2.6.0", "2.6.0", "2.0.0", 2)
-        return runCatching {
-            context.assets.open("VERSION.json").use { stream ->
-                val text = BufferedReader(InputStreamReader(stream)).readText()
-                json.decodeFromString<VersionManifest>(text)
-            }
-        }.getOrElse { fallback }
-    }
+    fun manifest(context: Context) = VersionManifest(
+        version = appVersion(context),
+        min_app_version = appVersion(context),
+        min_server_version = minServerVersion,
+        protocol_version = protocolVersion,
+    )
 }
 
 object SemVer {

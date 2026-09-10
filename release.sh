@@ -56,6 +56,36 @@ android_version_name() {
   echo "$version"
 }
 
+ios_version_name() {
+  local pbx="${IOS_APP_DIR}/Hopper.xcodeproj/project.pbxproj"
+  local version
+  [[ -f "$pbx" ]] || die "Xcode project not found: $pbx"
+  # Hopper app target, Release configuration — not HopperExtension.
+  version="$(
+    awk '
+      /isa = XCBuildConfiguration/ { v=""; p="" }
+      /MARKETING_VERSION[[:space:]]*=/ {
+        v=$0
+        sub(/.*MARKETING_VERSION[[:space:]]*=[[:space:]]*/, "", v)
+        sub(/;.*/, "", v)
+        gsub(/[[:space:]]/, "", v)
+      }
+      /PRODUCT_NAME[[:space:]]*=/ {
+        p=$0
+        sub(/.*PRODUCT_NAME[[:space:]]*=[[:space:]]*/, "", p)
+        sub(/;.*/, "", p)
+        gsub(/[[:space:]]/, "", p)
+      }
+      /name[[:space:]]*=[[:space:]]*Release;/ && p == "Hopper" && v != "" {
+        print v
+        exit
+      }
+    ' "$pbx"
+  )"
+  [[ -n "$version" ]] || die "Hopper Release MARKETING_VERSION not found in $pbx"
+  echo "$version"
+}
+
 require_artifact() {
   local path="$1"
   [[ -f "$path" && -s "$path" ]] || die "missing or empty artifact: $path"
@@ -223,7 +253,7 @@ main() {
   require_cmd gh
 
   local ios_ver android_ver server_ver tag
-  ios_ver="$(json_version "${IOS_APP_DIR}/Shared/VERSION.json")"
+  ios_ver="$(ios_version_name)"
   android_ver="$(android_version_name)"
   server_ver="$(json_version "${SERVER_DIR}/VERSION.json")"
   tag="ios${ios_ver}/android${android_ver}/server${server_ver}"

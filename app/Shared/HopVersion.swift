@@ -25,24 +25,20 @@ struct ServerVersionInfo: Codable, Equatable {
 }
 
 enum HopVersion {
-    static let manifest: VersionManifest = loadManifest()
+    static let minServerVersion = "2.0.0"
+    static let protocolVersion = 2
 
     static var appVersion: String {
         HopConstants.appVersion
     }
 
-    private static func loadManifest() -> VersionManifest {
-        let fallback = VersionManifest(
-            version: "2.6.0",
-            minAppVersion: "2.6.0",
-            minServerVersion: "2.0.0",
-            protocolVersion: 2
+    static var manifest: VersionManifest {
+        VersionManifest(
+            version: appVersion,
+            minAppVersion: appVersion,
+            minServerVersion: minServerVersion,
+            protocolVersion: protocolVersion
         )
-        guard let url = Bundle.main.url(forResource: "VERSION", withExtension: "json"),
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode(VersionManifest.self, from: data)
-        else { return fallback }
-        return decoded
     }
 }
 

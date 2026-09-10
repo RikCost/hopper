@@ -331,7 +331,7 @@ class VpnController(application: Application) : AndroidViewModel(application) {
                         _serverUpdatePrompt.value = ServerUpdatePrompt(
                             hopNames = outcome.hops.map { it.displayName },
                             hops = outcome.hops,
-                            targetVersion = HopVersion.manifest.version,
+                            targetVersion = HopVersion.appVersion(getApplication()),
                         )
                         pendingConnectRestart = restartHopperd
                         return@launch
@@ -419,8 +419,7 @@ class VpnController(application: Application) : AndroidViewModel(application) {
     }
 
     private fun preflightVersions(hops: List<HopNodeProfile>): PreflightResult {
-        val appVersion = com.aengix.hopper.model.HopConstants.appVersion(getApplication())
-        val manifest = HopVersion.manifest
+        val appVersion = HopVersion.appVersion(getApplication())
         val infos = hops.map { hop ->
             hop to VersionService.fetchServerVersion(hop)
         }
@@ -435,7 +434,7 @@ class VpnController(application: Application) : AndroidViewModel(application) {
 
         val outdated = infos.mapNotNull { (hop, info) ->
             val serverVersion = info.version ?: return@mapNotNull null
-            if (SemVer.compare(serverVersion, manifest.min_server_version) >= 0) null else hop
+            if (SemVer.compare(serverVersion, HopVersion.minServerVersion) >= 0) null else hop
         }
 
         if (outdated.isNotEmpty()) {

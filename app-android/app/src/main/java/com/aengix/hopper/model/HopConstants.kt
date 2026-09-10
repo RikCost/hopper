@@ -27,5 +27,5 @@ object HopConstants {
     fun appVersion(context: Context): String = runCatching {
         @Suppress("DEPRECATION")
         context.packageManager.getPackageInfo(context.packageName, 0).versionName
-    }.getOrNull() ?: HopVersion.manifest.version
+    }.getOrNull() ?: "3.0.0"
 }
