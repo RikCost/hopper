@@ -17,7 +17,6 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -42,13 +41,14 @@ fun ChainDetailScreen(
     val chain = state.chains.firstOrNull { it.id == chainId }
     val hops = chain?.let { state.resolveHops(it) }.orEmpty()
     var name by remember(chain?.name) { mutableStateOf(chain?.name.orEmpty()) }
-    var showExport by remember { mutableStateOf(false) }
+    var exportMode by remember { mutableStateOf<HopperExportMode?>(null) }
 
-    if (showExport) {
+    exportMode?.let { mode ->
         ChainExportScreen(
             chainName = chain?.name.orEmpty(),
             hops = hops,
-            onBack = { showExport = false },
+            mode = mode,
+            onBack = { exportMode = null },
         )
         return
     }
@@ -60,13 +60,6 @@ fun ChainDetailScreen(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                    }
-                },
-                actions = {
-                    if (hops.isNotEmpty()) {
-                        TextButton(onClick = { showExport = true }) {
-                            Text("Export")
-                        }
                     }
                 },
             )
@@ -98,7 +91,7 @@ fun ChainDetailScreen(
             Text("Status", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
             val statusReports by vpn.chainStatusReports.collectAsState()
             val reports = statusReports[chainId].orEmpty()
-            Button(onClick = { vpn.fetchChainStatus(chainId) }, enabled = hops.isNotEmpty()) {
+            Button(onClick = { vpn.fetchChainStatus(chainId) }, enabled = hops.isNotEmpty(), modifier = Modifier.dPadActivate(enabled = hops.isNotEmpty()) { vpn.fetchChainStatus(chainId) }) {
                 Text("Refresh status")
             }
             reports.forEachIndexed { index, report ->
@@ -138,9 +131,18 @@ fun ChainDetailScreen(
 
             Button(
                 onClick = onAddServer,
-                modifier = Modifier.padding(top = 8.dp),
+                modifier = Modifier
+                    .padding(top = 8.dp)
+                    .dPadActivate(onClick = onAddServer),
             ) {
                 Text("Add server…")
+            }
+
+            if (hops.isNotEmpty()) {
+                HopperExportButtonsRow(
+                    modifier = Modifier.padding(top = 16.dp),
+                    onSelect = { exportMode = it },
+                )
             }
         }
     }

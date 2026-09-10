@@ -37,14 +37,15 @@ You do **not** need a Mac or `deploy.sh` to get started. The app installs and co
 
 1. Open **ɹǝddoH** → **Configure chains** → **Server library**.
 2. Tap **Deploy**.
-3. Enter the VPS **host/IP**, **user** (`root`), **SSH port** (`22`), and **root password**.
-4. Wait for the deploy log to finish — the server is added to your library automatically (no QR scan needed).
+3. Enter the VPS **host/IP**, **user** (`root`), **SSH port** (`22`).
+4. Authenticate with **Password** (root password) or **Saved key** from [Keys library](#keys-library).
+5. Wait for the deploy log to finish — the server is added to your library automatically (no QR scan needed).
 
-The app uploads `hopperd`, runs `configure_server.sh`, generates a deploy key, and saves the server profile locally. Repeat for each hop.
+The app uploads `hopperd`, runs `configure_server.sh`, and saves the server profile locally. A password deploy also generates an ED25519 key, installs its public half in `authorized_keys`, and stores the private key in Keys library for the next deploy. Repeat for each hop.
 
 **Alternative (developers):** deploy from your Mac with `./deploy.sh` — see [Deploy from the command line](#deploy-from-the-command-line).
 
-You can also add servers via **Scan QR** or **Import** (`.hopperconf` file / paste JSON) if you used the CLI deploy flow.
+You can also add servers via **Scan QR**, **Import from file**, **Import from copy&paste**, or **Import remotely** if you used the CLI deploy flow. The same import path accepts a shared **key** payload into Keys library.
 
 ## Screenshots
 
@@ -305,13 +306,30 @@ Binaries land in `server/dist/` (gitignored).
 
 | Screen               | Purpose                                         |
 | -------------------- | ----------------------------------------------- |
-| **Home**             | Select chain, connect/disconnect, route preview |
-| **Configure chains** | Create/delete chains, open server library       |
+| **Home**             | Select chain, connect/disconnect, route preview, import/export |
+| **Configure chains** | Create/delete chains, open server library and keys library |
 | **Chain detail**     | Name, reorder hops, add/remove servers          |
 | **Server library**   | **Deploy** new servers, scan QR, import `.hopperconf` / JSON, delete servers |
-| **Export**           | QR (in-person) + encrypted `.hopperconf` share for servers and chains |
+| **Keys library**     | List deploy keys and assigned `user@host`, generate ED25519, paste/validate PEM, scan QR, import/export `.hopperconf` |
+| **Export**           | **Export as file…** and **Show QR code…** on one row (home, chain, server, key) |
 
-Profiles persist in the App Group (`hopper-profiles.json`).
+Profiles persist in the App Group (`hopper-profiles.json`). Existing deploy keys from earlier app versions are picked up into Keys library on first launch after update.
+
+### Keys library
+
+Deploy keys are the identities the app uses to **SSH in and install** Hopper. They are separate from each server’s hop key (`HopNodeProfile.privateKey` / `~/.hopper/id_ed25519`), which is used for the VPN tunnel after install.
+
+From **Configure chains** → **Keys library** you can:
+
+- See every saved private key and the servers it has been used on (`user@host`, plus the library name when the host matches)
+- **Generate** a new ED25519 key and copy the public and private halves
+- **Paste** an OpenSSH ED25519 private key (validated immediately) and a name
+- **Import** a key as a QR code (in-person) or an encrypted [`.hopperconf`](#hopperconf-share-files-v1) file. **Export as file…** / **Show QR code…** use the same password rules as servers and chains, including the default password
+- Delete a key only when no library servers are still assigned to it
+
+On deploy, choose **Saved key** instead of a password to reuse a library key. Password deploy still works: it creates a new library key named `Deploy user@host` and records that assignment.
+
+Updating from an older app version keeps every key already stored in `deployKeys`. Auto-generated `Deploy user@host` names are matched to servers in the library so assignments appear without redeploying. Hop daemon keys on server profiles are **not** copied into Keys library.
 
 ### Server profile JSON (v2)
 
@@ -351,7 +369,9 @@ Treat exported JSON and QR codes as **secrets** (they contain the hop private ke
 
 ### `.hopperconf` share files (v1)
 
-Servers and chains are shared between devices as encrypted **`.hopperconf`** files (`application/x-hopperconf`). QR codes stay **unencrypted** for in-person scanning only — they are never written to a shareable file.
+Servers, chains, and **deploy keys** are shared between devices as encrypted **`.hopperconf`** files (`application/x-hopperconf`). QR codes stay **unencrypted** for in-person scanning only — they are never written to a shareable file.
+
+**Import remotely** is a live LAN session, not a file. The receiving device listens on `0.0.0.0` (ephemeral port), shows a `hopperconf://recv?ip=&port=&fp=&v=1` QR (`fp` is the SHA-256 of that session’s TLS certificate). Scan it with the **Camera** app on the other phone (in-app **Scan QR** also works). After TLS pinning succeeds, the sender can share several chains, servers, or keys until **Disconnect**. The listener accepts only one peer at a time.
 
 #### Envelope (on disk)
 
@@ -404,7 +424,20 @@ Always JSON. Private keys live only inside the encrypted `data` blob.
 }
 ```
 
-Apps open `.hopperconf` via the share sheet / Files / “open with”. Interop tests (Python reference, Swift CryptoKit, Android `HopperConf`) live under `tests/hopperconf/` — run `./tests/hopperconf/run.sh`.
+**Key** (deploy identity only — name + private key; local server assignments are not shared). QR uses this same plaintext JSON; files wrap it in the encrypted envelope:
+
+```json
+{
+  "v": 1,
+  "kind": "key",
+  "key": {
+    "name": "Deploy root@203.0.113.10",
+    "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\n..."
+  }
+}
+```
+
+Apps open `.hopperconf` via the share sheet / Files / “open with”. A `kind: key` payload is stored in Keys library (duplicate public-key fingerprints are merged). Interop tests (Python reference, Swift CryptoKit, Android `HopperConf`) live under `tests/hopperconf/` — run `./tests/hopperconf/run.sh`.
 
 ### Build & run
 
@@ -430,7 +463,7 @@ app/
   Hopper/              SwiftUI app, VPNController, ChainProvisioner
   HopperExtension/     PacketTunnelProvider
   TunnelCore/          SSHHopConnector, IPTunnelEngine, HopSSH
-  Shared/              Models, HopConstants, ProfileStore
+  Shared/              Models, HopConstants, ProfileStore, HopperConf, KeysLibraryMigration
   Vendor/Citadel/      SSH client library
 app-android/
   app/                 Jetpack Compose UI, VpnController, HopperVpnService
@@ -447,9 +480,9 @@ server/
 
 ## Android app reference
 
-Same screens and flow as iOS: home (chain + connect), chain configurator, chain detail, server library (**Deploy**, QR scan + `.hopperconf` / JSON import), encrypted file share for servers and chains.
+Same screens and flow as iOS: home (chain + connect), chain configurator, chain detail, server library (**Deploy**, QR scan, import from file / paste / remotely), **Keys library** (generate / paste PEM / QR / import / export deploy keys), encrypted file share for servers, chains, and keys.
 
-Profiles persist in app-private storage (`hopper-profiles.json`). Server profile JSON and `.hopperconf` formats are identical to iOS — see [Server profile JSON (v2)](#server-profile-json-v2) and [`.hopperconf` share files (v1)](#hopperconf-share-files-v1).
+Profiles persist in app-private storage (`hopper-profiles.json`). Server profile JSON and `.hopperconf` formats are identical to iOS — see [Server profile JSON (v2)](#server-profile-json-v2), [Keys library](#keys-library), and [`.hopperconf` share files (v1)](#hopperconf-share-files-v1).
 
 ### Build & run
 
@@ -544,8 +577,8 @@ app-android/
     ssh/                 HopSSH, SSHHopConnector (SSHJ)
     tunnel/              IPTunnelFrame, IPTunnelEngine
     provision/           ChainProvisioner
-    model/               AppState, HopNodeProfile, HopChain
-    data/                ProfileStore, HopQRParser
+    model/               AppState, HopNodeProfile, HopChain, DeploySSHKey
+    data/                ProfileStore, HopQRParser, HopperConf, KeysLibraryMigration
 ```
 
 ---
@@ -575,8 +608,8 @@ cd ~/hopper && ./start_server.sh --stop-only
 
 ## Security notes
 
-- QR and deploy HTML contain **private keys** — treat as secrets; deploy deletes local HTML after 5s.
-- Each hop has its own `~/.hopper/id_ed25519`; provision adds upstream pubkeys to downstream `authorized_keys`.
+- QR, deploy HTML, and `.hopperconf` files contain **private keys** — treat as secrets; deploy deletes local HTML after 5s.
+- Keys library holds **deploy** identities (SSH install). Each hop still has its own `~/.hopper/id_ed25519` for the tunnel; provision adds upstream pubkeys to downstream `authorized_keys`.
 - `hopperd` binds to loopback; only SSH-forwarded clients reach iptunnel.
 - Review `authorized_keys` after `remove.sh` if you added keys manually.
 

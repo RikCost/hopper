@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
@@ -30,9 +29,10 @@ fun ImportConfDialog(
     onDismiss: () -> Unit,
     onImport: (HopperConf.Payload) -> Unit,
     onError: (String) -> Unit,
+    initialTab: Int = 0,
 ) {
     val context = LocalContext.current
-    var tab by remember { mutableIntStateOf(0) }
+    var tab by remember { mutableIntStateOf(initialTab) }
     var jsonText by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var pendingBytes by remember { mutableStateOf<ByteArray?>(null) }
@@ -63,7 +63,7 @@ fun ImportConfDialog(
         }
     }
 
-    AlertDialog(
+    HopperAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Import") },
         text = {
@@ -73,17 +73,30 @@ fun ImportConfDialog(
                     Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Paste") })
                 }
                 if (tab == 0) {
-                    TextButton(onClick = {
-                        picker.launch(
-                            arrayOf(
-                                HopperConf.MIME_TYPE,
-                                "application/octet-stream",
-                                "application/json",
-                                "text/plain",
-                                "*/*",
-                            ),
-                        )
-                    }) {
+                    TextButton(
+                        onClick = {
+                            picker.launch(
+                                arrayOf(
+                                    HopperConf.MIME_TYPE,
+                                    "application/octet-stream",
+                                    "application/json",
+                                    "text/plain",
+                                    "*/*",
+                                ),
+                            )
+                        },
+                        modifier = Modifier.dPadActivate {
+                            picker.launch(
+                                arrayOf(
+                                    HopperConf.MIME_TYPE,
+                                    "application/octet-stream",
+                                    "application/json",
+                                    "text/plain",
+                                    "*/*",
+                                ),
+                            )
+                        },
+                    ) {
                         Text(if (pendingBytes != null) "Choose another file…" else "Choose .hopperconf…")
                     }
                     OutlinedTextField(
@@ -121,7 +134,13 @@ fun ImportConfDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            DialogActionButton(
+                text = "Import",
+                autoFocus = true,
+                enabled = when (tab) {
+                    0 -> pendingBytes != null
+                    else -> jsonText.trim().isNotEmpty()
+                },
                 onClick = {
                     errorMessage = null
                     runCatching {
@@ -141,14 +160,10 @@ fun ImportConfDialog(
                         onError(error.message ?: "Import failed")
                     }
                 },
-                enabled = when (tab) {
-                    0 -> pendingBytes != null
-                    else -> jsonText.trim().isNotEmpty()
-                },
-            ) { Text("Import") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            DialogActionButton(text = "Cancel", onClick = onDismiss)
         },
     )
 }
@@ -159,7 +174,7 @@ fun HopperConfPasswordDialog(
     onImport: (String) -> Unit,
 ) {
     var password by remember { mutableStateOf("") }
-    AlertDialog(
+    HopperAlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Import .hopperconf") },
         text = {
@@ -177,10 +192,10 @@ fun HopperConfPasswordDialog(
             }
         },
         confirmButton = {
-            TextButton(onClick = { onImport(password) }) { Text("Import") }
+            DialogActionButton(text = "Import", autoFocus = true, onClick = { onImport(password) })
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Cancel") }
+            DialogActionButton(text = "Cancel", onClick = onDismiss)
         },
     )
 }

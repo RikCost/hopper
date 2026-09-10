@@ -1,5 +1,6 @@
 package com.aengix.hopper.model
 
+import com.aengix.hopper.ssh.SSHKeyGenerator
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -25,6 +26,30 @@ data class AppState(
     fun addServer(server: HopNodeProfile): AppState = copy(servers = servers + server)
 
     fun addDeployKey(key: DeploySSHKey): AppState = copy(deployKeys = deployKeys + key)
+
+    fun importDeployKey(key: DeploySSHKey): AppState {
+        val fingerprint = SSHKeyGenerator.normalizedPublicKeyLine(key.privateKey)
+        if (fingerprint != null && deployKeys.any {
+                SSHKeyGenerator.normalizedPublicKeyLine(it.privateKey) == fingerprint
+            }
+        ) {
+            return this
+        }
+        val stored = key.copy(
+            id = java.util.UUID.randomUUID().toString(),
+            createdAt = if (key.createdAt == 0L) System.currentTimeMillis() else key.createdAt,
+        )
+        return copy(deployKeys = deployKeys + stored)
+    }
+
+    fun renameDeployKey(id: String, name: String): AppState =
+        copy(deployKeys = deployKeys.map { if (it.id == id) it.copy(name = name) else it })
+
+    fun recordDeployKeyUse(id: String, server: HopNodeProfile): AppState =
+        copy(deployKeys = deployKeys.map { if (it.id == id) it.recordAssignment(server) else it })
+
+    fun removeDeployKeys(ids: Set<String>): AppState =
+        copy(deployKeys = deployKeys.filterNot { it.id in ids && it.canDelete(servers) })
 
     fun deployKey(id: String): DeploySSHKey? = deployKeys.firstOrNull { it.id == id }
 

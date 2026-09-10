@@ -3,6 +3,7 @@ import SwiftUI
 struct ChainExportView: View {
     let chainName: String
     let hops: [HopNodeProfile]
+    var mode: HopperExportMode = .file
     @Environment(\.dismiss) private var dismiss
 
     @State private var password = ""
@@ -18,53 +19,52 @@ struct ChainExportView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
-                Section {
-                    Text("Scan on another device to import this chain and its servers. The QR is only for in-person transfer.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    if hops.isEmpty {
-                        Text("Add servers to this chain before exporting.")
+            Group {
+                if mode == .qr {
+                    VStack(spacing: 16) {
+                        Text("Scan on another device to import this chain and its servers. The QR is only for in-person transfer.")
+                            .font(.footnote)
                             .foregroundStyle(.secondary)
-                    } else if let qr = HopQRCodeImage.make(from: qrJSON) {
-                        Image(uiImage: qr)
-                            .interpolation(.none)
-                            .resizable()
-                            .scaledToFit()
-                            .frame(maxWidth: .infinity)
-                            .aspectRatio(1, contentMode: .fit)
-                            .padding(8)
-                            .background(Color.white)
-                            .clipShape(RoundedRectangle(cornerRadius: 12))
-                            .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 12, trailing: 16))
-                    } else {
-                        Text("Could not generate QR code (payload may be too large). Use Share file instead.")
-                            .foregroundStyle(.orange)
+                            .multilineTextAlignment(.center)
+                        if hops.isEmpty {
+                            Text("Add servers to this chain before exporting.")
+                                .foregroundStyle(.secondary)
+                        } else if let qr = HopQRCodeImage.make(from: qrJSON) {
+                            HopFitQRCode(image: qr)
+                        } else {
+                            Text("Could not generate QR code (payload may be too large). Export as a file instead.")
+                                .foregroundStyle(.orange)
+                        }
                     }
-                } header: {
-                    Text("QR (device to device)")
-                }
-
-                Section {
-                    SecureField("Optional encryption password", text: $password)
-                    Text("Leave empty to use the default password. The file always encrypts private keys.")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Button("Share .hopperconf…") {
-                        shareFile()
-                    }
-                    .disabled(hops.isEmpty)
-                } header: {
-                    Text("Share file")
-                }
-
-                if let errorMessage {
-                    Section {
-                        Text(errorMessage).foregroundStyle(.red)
+                    .padding()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    Form {
+                        Section {
+                            if hops.isEmpty {
+                                Text("Add servers to this chain before exporting.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                SecureField("Optional encryption password", text: $password)
+                                Text("Leave empty to use the default password. The file always encrypts private keys.")
+                                    .font(.footnote)
+                                    .foregroundStyle(.secondary)
+                                Button("Share .hopperconf…") {
+                                    shareFile()
+                                }
+                            }
+                        } header: {
+                            Text("Share file")
+                        }
+                        if let errorMessage {
+                            Section {
+                                Text(errorMessage).foregroundStyle(.red)
+                            }
+                        }
                     }
                 }
             }
-            .navigationTitle("Export chain")
+            .navigationTitle(mode.navigationTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {

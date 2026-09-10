@@ -30,6 +30,19 @@ object SSHKeyGenerator {
         return openSSHPublicKeyLine(publicBytes, comment)
     }
 
+    /** Type + base64 blob only (comment stripped). Null if the PEM is not a valid ED25519 key. */
+    fun normalizedPublicKeyLine(privateKeyPem: String): String? {
+        return runCatching { stripPublicKeyComment(publicKeyLine(privateKeyPem)) }.getOrNull()
+    }
+
+    fun isValidPrivateKey(privateKeyPem: String): Boolean =
+        normalizedPublicKeyLine(privateKeyPem) != null
+
+    fun stripPublicKeyComment(line: String): String {
+        val parts = line.trim().split(Regex("\\s+"))
+        return if (parts.size >= 2) "${parts[0]} ${parts[1]}" else line.trim()
+    }
+
     private fun openSSHPublicKeyLine(publicKeyBytes: ByteArray, comment: String): String {
         val blob = sshWireBlob("ssh-ed25519", publicKeyBytes)
         val encoded = Base64.getEncoder().encodeToString(blob)

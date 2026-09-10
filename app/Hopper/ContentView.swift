@@ -4,9 +4,9 @@ struct ContentView: View {
     @EnvironmentObject private var vpn: VPNController
     @State private var showConnectOptions = false
     @State private var showServerUpdateAlert = false
-    @State private var showShareChain = false
+    @State private var shareMode: HopperExportMode?
     @State private var showScanner = false
-    @State private var showImport = false
+    @State private var importMode: HopperImportMode?
 
     private var actionsDisabled: Bool {
         vpn.isBusy || vpn.provisionStatus != nil
@@ -59,50 +59,49 @@ struct ContentView: View {
                     }
 
                     // Bordered styles so List doesn't treat the whole row as one control
-                    // (plain Buttons in an HStack often fire Connect and Share together).
+                    // (plain Buttons in an HStack often fire adjacent actions together).
                     VStack(spacing: 10) {
-                        HStack(spacing: 12) {
-                            Button(vpn.isConnected ? "Disconnect" : "Connect") {
-                                if vpn.isConnected || vpn.isBusy {
-                                    vpn.disconnect()
-                                } else {
-                                    showConnectOptions = true
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.regular)
-                            .disabled(actionsDisabled || vpn.state.entryHop == nil)
-                            .frame(maxWidth: .infinity)
-
-                            Button("Share…") {
-                                showShareChain = true
-                            }
-                            .buttonStyle(.bordered)
-                            .disabled(actionsDisabled || vpn.state.activeHops.isEmpty)
-                            .frame(maxWidth: .infinity)
-                        }
-
-                        HStack(spacing: 12) {
-                            Button("Scan QR") { showScanner = true }
-                                .buttonStyle(.bordered)
-                                .disabled(actionsDisabled)
-                                .frame(maxWidth: .infinity)
-
-                            Button("Import") { showImport = true }
-                                .buttonStyle(.bordered)
-                                .disabled(actionsDisabled)
-                                .frame(maxWidth: .infinity)
-                        }
-                    }
-
-                    Text(statusLabel)
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-
-                    if let provision = vpn.provisionStatus {
-                        Text(provision)
+                        Text(statusLabel)
                             .font(.footnote)
-                            .foregroundStyle(.orange)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let provision = vpn.provisionStatus {
+                            Text(provision)
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        if let error = vpn.errorMessage {
+                            Text(error)
+                                .font(.footnote)
+                                .foregroundStyle(.red)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+
+                        Button(vpn.isConnected ? "Disconnect" : "Connect") {
+                            if vpn.isConnected || vpn.isBusy {
+                                vpn.disconnect()
+                            } else {
+                                showConnectOptions = true
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                        .disabled(actionsDisabled || vpn.state.entryHop == nil)
+                        .frame(maxWidth: .infinity)
+
+                        HopperExportButtonsRow(
+                            enabled: !actionsDisabled && !vpn.state.activeHops.isEmpty
+                        ) { shareMode = $0 }
+
+                        HopperImportButtons(enabled: !actionsDisabled) { importMode = $0 }
+
+                        Button("Scan QR") { showScanner = true }
+                            .buttonStyle(.bordered)
+                            .disabled(actionsDisabled)
+                            .frame(maxWidth: .infinity)
                     }
                 }
 
@@ -117,12 +116,6 @@ struct ContentView: View {
                                     .foregroundStyle(.secondary)
                             }
                         }
-                    }
-                }
-
-                if let error = vpn.errorMessage {
-                    Section("Error") {
-                        Text(error).foregroundStyle(.red)
                     }
                 }
             }
@@ -167,9 +160,9 @@ struct ContentView: View {
             }
             .onChange(of: vpn.chainImportPrompt != nil) { _, showing in
                 if showing {
-                    showImport = false
+                    importMode = nil
                     showScanner = false
-                    showShareChain = false
+                    shareMode = nil
                     showConnectOptions = false
                 }
             }
@@ -192,28 +185,25 @@ struct ContentView: View {
             } message: {
                 Text(vpn.chainImportPrompt?.message ?? "The chain was imported successfully.")
             }
-            .sheet(isPresented: $showShareChain) {
+            .sheet(item: $shareMode) { mode in
                 ChainExportView(
                     chainName: vpn.state.selectedChain?.name ?? "",
-                    hops: vpn.state.activeHops
+                    hops: vpn.state.activeHops,
+                    mode: mode
                 )
             }
             .sheet(isPresented: $showScanner) {
                 QRCodeScannerView { payload in
-                    do {
-                        let imported = try HopperConf.parsePayloadJSON(payload)
-                        _ = vpn.importPayload(imported)
+                    if vpn.handleScannedQR(payload) {
                         showScanner = false
-                    } catch {
-                        vpn.errorMessage = error.localizedDescription
                     }
                 }
             }
-            .sheet(isPresented: $showImport) {
-                HopImportView { payload in
-                    _ = vpn.importPayload(payload)
-                    showImport = false
-                }
+            .sheet(item: $importMode) { mode in
+                HopperImportSheet(mode: mode) { importMode = nil }
+            }
+            .onChange(of: vpn.pendingLanInvite) { _, invite in
+                if invite != nil { showScanner = false }
             }
             .sheet(item: Binding(
                 get: { vpn.pendingHopperConfData.map { HopperConfPendingItem(data: $0) } },
@@ -234,11 +224,11 @@ struct ContentView: View {
     }
 
     /// Dismiss overlays first and delay connect so alert/dialog dismissal
-    /// doesn't deliver the same tap to Share… underneath (which races VPN start).
+    /// doesn't deliver the same tap to export buttons underneath (which races VPN start).
     private func scheduleConnect(restartHopperd: Bool) {
-        showShareChain = false
+        shareMode = nil
         showScanner = false
-        showImport = false
+        importMode = nil
         showConnectOptions = false
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 450_000_000)

@@ -20,6 +20,24 @@ enum SSHKeyGenerator {
         return openSSHPublicKeyLine(publicKey: privateKey.publicKey, comment: comment)
     }
 
+    /// Type + base64 blob only (comment stripped). Nil if the PEM is not a valid ED25519 key.
+    static func normalizedPublicKeyLine(privateKeyPEM: String) -> String? {
+        guard let line = try? publicKeyLine(privateKeyPEM: privateKeyPEM) else { return nil }
+        return stripPublicKeyComment(line)
+    }
+
+    static func isValidPrivateKey(_ privateKeyPEM: String) -> Bool {
+        normalizedPublicKeyLine(privateKeyPEM: privateKeyPEM) != nil
+    }
+
+    static func stripPublicKeyComment(_ line: String) -> String {
+        let parts = line.split(omittingEmptySubsequences: true, whereSeparator: { $0.isWhitespace })
+        guard parts.count >= 2 else {
+            return line.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return "\(parts[0]) \(parts[1])"
+    }
+
     private static func openSSHPublicKeyLine(publicKey: Curve25519.Signing.PublicKey, comment: String) -> String {
         var blob = Data()
         appendSSHString("ssh-ed25519", to: &blob)

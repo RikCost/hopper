@@ -6,7 +6,7 @@ struct ChainDetailView: View {
 
     @State private var name: String = ""
     @State private var statusLoading = false
-    @State private var showExport = false
+    @State private var exportMode: HopperExportMode?
 
     private var chain: HopChain? {
         vpn.state.chains.first { $0.id == chainID }
@@ -99,6 +99,12 @@ struct ChainDetailView: View {
                             Text("Add server…")
                         }
                     }
+
+                    if !hops.isEmpty {
+                        Section("Share") {
+                            HopperExportButtonsRow { exportMode = $0 }
+                        }
+                    }
                 }
             } else {
                 ContentUnavailableView("Chain not found", systemImage: "link.badge.plus")
@@ -107,15 +113,14 @@ struct ChainDetailView: View {
         .navigationTitle(chain?.displayName ?? "Chain")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
-            ToolbarItemGroup(placement: .primaryAction) {
+            ToolbarItem(placement: .primaryAction) {
                 if !hops.isEmpty {
-                    Button("Export…") { showExport = true }
                     EditButton()
                 }
             }
         }
-        .sheet(isPresented: $showExport) {
-            ChainExportView(chainName: chain?.name ?? "", hops: hops)
+        .sheet(item: $exportMode) { mode in
+            ChainExportView(chainName: chain?.name ?? "", hops: hops, mode: mode)
         }
         .onAppear {
             name = chain?.name ?? ""

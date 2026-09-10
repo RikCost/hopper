@@ -142,3 +142,14 @@ def sample_chain_payload() -> dict[str, Any]:
         "name": "Interop Chain",
         "hops": [hop_a, hop_b],
     }
+
+
+def sample_key_payload() -> dict[str, Any]:
+    return {
+        "v": PAYLOAD_VERSION,
+        "kind": "key",
+        "key": {
+            "name": "interop-key",
+            "private_key": "-----BEGIN OPENSSH PRIVATE KEY-----\nTESTKEY\n-----END OPENSSH PRIVATE KEY-----",
+        },
+    }

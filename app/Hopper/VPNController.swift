@@ -24,6 +24,7 @@ final class VPNController: ObservableObject {
     @Published private(set) var chainStatusReports: [UUID: [ChainStatusReport]] = [:]
     /// External `.hopperconf` open (Files / share sheet) awaiting password + import.
     @Published var pendingHopperConfData: Data?
+    @Published var pendingLanInvite: HopperLanInvite?
 
     private var manager: NETunnelProviderManager?
     private var statusObserver: NSObjectProtocol?
@@ -38,7 +39,7 @@ final class VPNController: ObservableObject {
 
     /// Apply a shared server or chain payload (new IDs minted for servers/chains).
     @discardableResult
-    func importPayload(_ payload: HopperConf.Payload) -> String {
+    func importPayload(_ payload: HopperConf.Payload, announceChain: Bool = true) -> String {
         switch payload {
         case .server(let profile):
             state.addServer(profile)
@@ -59,14 +60,18 @@ final class VPNController: ObservableObject {
             let label = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "Untitled chain" : name
             let message = "Imported chain \(label) with \(hops.count) server(s)."
-            // Defer the success alert so any import/password sheet can finish
-            // dismissing first (presenting an alert over a sheet fails on iOS/Mac).
-            let prompt = ChainImportPrompt(chainID: chainID, message: message)
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 400_000_000)
-                self.chainImportPrompt = prompt
+            if announceChain {
+                let prompt = ChainImportPrompt(chainID: chainID, message: message)
+                Task { @MainActor in
+                    try? await Task.sleep(nanoseconds: 400_000_000)
+                    self.chainImportPrompt = prompt
+                }
             }
             return message
+        case .key(let key):
+            let stored = state.importDeployKey(key)
+            persist()
+            return "Imported key \(stored.displayName)."
         }
     }
 
@@ -75,6 +80,14 @@ final class VPNController: ObservableObject {
     }
 
     func handleIncomingHopperConfURL(_ url: URL) {
+        if url.scheme?.lowercased() == HopperLanInvite.scheme {
+            if let invite = HopperLanInvite.parse(url) {
+                pendingLanInvite = invite
+            } else {
+                errorMessage = "Not a valid Hopper remote-import link."
+            }
+            return
+        }
         let accessed = url.startAccessingSecurityScopedResource()
         defer {
             if accessed { url.stopAccessingSecurityScopedResource() }
@@ -94,6 +107,23 @@ final class VPNController: ObservableObject {
         }
     }
 
+    /// Returns true when the scanner should dismiss (LAN invite or successful import).
+    @discardableResult
+    func handleScannedQR(_ text: String) -> Bool {
+        if let invite = HopperLanInvite.parse(text) {
+            pendingLanInvite = invite
+            return true
+        }
+        do {
+            let imported = try HopperConf.parsePayloadJSON(text)
+            _ = importPayload(imported)
+            return true
+        } catch {
+            errorMessage = error.localizedDescription
+            return false
+        }
+    }
+
     var isConnected: Bool { vpnStatus == .connected }
     var isBusy: Bool { vpnStatus == .connecting || vpnStatus == .disconnecting }
 
@@ -106,6 +136,11 @@ final class VPNController: ObservableObject {
 
     func addDeployKey(_ key: DeploySSHKey) {
         state.addDeployKey(key)
+        persist()
+    }
+
+    func importDeployKey(_ key: DeploySSHKey) {
+        _ = state.importDeployKey(key)
         persist()
     }
 
@@ -123,10 +158,23 @@ final class VPNController: ObservableObject {
             auth: auth,
             onLog: onLog
         )
-        if let newKey = result.newDeployKey {
+        if var newKey = result.newDeployKey {
+            newKey.recordAssignment(from: result.profile)
             state.addDeployKey(newKey)
+        } else if case .deployKey(let key) = auth {
+            state.recordDeployKeyUse(id: key.id, server: result.profile)
         }
         state.addServer(result.profile)
+        persist()
+    }
+
+    func deleteDeployKey(id: UUID) {
+        state.removeDeployKey(id: id)
+        persist()
+    }
+
+    func renameDeployKey(id: UUID, name: String) {
+        state.renameDeployKey(id: id, name: name)
         persist()
     }
 

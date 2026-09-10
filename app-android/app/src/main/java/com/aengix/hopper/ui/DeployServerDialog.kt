@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -65,7 +64,7 @@ fun DeployServerDialog(
         }
     }
 
-    AlertDialog(
+    HopperAlertDialog(
         onDismissRequest = { if (!isDeploying) onDismiss() },
         title = { Text("Deploy Server") },
         text = {
@@ -122,7 +121,7 @@ fun DeployServerDialog(
                                 modifier = Modifier.fillMaxWidth(),
                             )
                             Text(
-                                "A new deploy key is generated, saved in the key library, and installed on the server.",
+                                "A new deploy key is generated, saved in the Keys library, and installed on the server.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -130,14 +129,17 @@ fun DeployServerDialog(
                         DeployAuthMode.SavedKey -> {
                             if (deployKeys.isEmpty()) {
                                 Text(
-                                    "No saved deploy keys yet. Use password once to create one.",
+                                    "No keys in the library yet. Generate or paste one in Keys library, or use password once.",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             } else {
                                 deployKeys.forEach { key ->
                                     val selected = (selectedKeyId ?: deployKeys.firstOrNull()?.id) == key.id
-                                    TextButton(onClick = { selectedKeyId = key.id }) {
+                                    TextButton(
+                                        onClick = { selectedKeyId = key.id },
+                                        modifier = Modifier.dPadActivate { selectedKeyId = key.id },
+                                    ) {
                                         Text(
                                             if (selected) "● ${key.name}" else key.name,
                                             color = if (selected) MaterialTheme.colorScheme.primary
@@ -185,7 +187,9 @@ fun DeployServerDialog(
             }
         },
         confirmButton = {
-            TextButton(
+            DialogActionButton(
+                text = "Deploy",
+                autoFocus = true,
                 enabled = !isDeploying && canDeploy(host, authMode, password, deployKeys, selectedKeyId),
                 onClick = {
                     errorMessage = null
@@ -200,7 +204,7 @@ fun DeployServerDialog(
                                 ?: run {
                                     errorMessage = "Select a deploy key from the library."
                                     isDeploying = false
-                                    return@TextButton
+                                    return@DialogActionButton
                                 }
                             ServerDeployAuth.DeployKey(key)
                         }
@@ -224,10 +228,10 @@ fun DeployServerDialog(
                         }
                     }
                 },
-            ) { Text("Deploy") }
+            )
         },
         dismissButton = {
-            TextButton(onClick = onDismiss, enabled = !isDeploying) { Text("Cancel") }
+            DialogActionButton(text = "Cancel", onClick = onDismiss, enabled = !isDeploying)
         },
     )
 }

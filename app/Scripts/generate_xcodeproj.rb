@@ -366,7 +366,7 @@ pbx = <<~PBXPROJ
   			"$(inherited)",
   			"@executable_path/Frameworks",
   		);
-  		MARKETING_VERSION = 2.6.0;
+  		MARKETING_VERSION = 3.0.0;
   		PRODUCT_BUNDLE_IDENTIFIER = com.aengix.hopper;
   		PRODUCT_NAME = Hopper;
   		SWIFT_EMIT_LOC_STRINGS = YES;
@@ -392,7 +392,7 @@ pbx = <<~PBXPROJ
   			"$(inherited)",
   			"@executable_path/Frameworks",
   		);
-  		MARKETING_VERSION = 2.6.0;
+  		MARKETING_VERSION = 3.0.0;
   		PRODUCT_BUNDLE_IDENTIFIER = com.aengix.hopper;
   		PRODUCT_NAME = Hopper;
   		SWIFT_EMIT_LOC_STRINGS = YES;
@@ -414,7 +414,7 @@ pbx = <<~PBXPROJ
   			"@executable_path/Frameworks",
   			"@executable_path/../../Frameworks",
   		);
-  		MARKETING_VERSION = 2.6.0;
+  		MARKETING_VERSION = 3.0.0;
   		PRODUCT_BUNDLE_IDENTIFIER = com.aengix.hopper.tunnel;
   		PRODUCT_NAME = HopperExtension;
   		SKIP_INSTALL = YES;
@@ -437,7 +437,7 @@ pbx = <<~PBXPROJ
   			"@executable_path/Frameworks",
   			"@executable_path/../../Frameworks",
   		);
-  		MARKETING_VERSION = 2.6.0;
+  		MARKETING_VERSION = 3.0.0;
   		PRODUCT_BUNDLE_IDENTIFIER = com.aengix.hopper.tunnel;
   		PRODUCT_NAME = HopperExtension;
   		SKIP_INSTALL = YES;

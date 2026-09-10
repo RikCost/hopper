@@ -6,7 +6,7 @@ struct ServerLibraryView: View {
     var chainID: UUID? = nil
 
     @State private var showScanner = false
-    @State private var showImportJSON = false
+    @State private var importMode: HopperImportMode?
     @State private var showDeploy = false
 
     private var isPickMode: Bool { chainID != nil }
@@ -20,6 +20,9 @@ struct ServerLibraryView: View {
 
     var body: some View {
         List {
+            Section {
+                HopperImportButtons { importMode = $0 }
+            }
             if displayedServers.isEmpty {
                 ContentUnavailableView(
                     "No servers",
@@ -62,28 +65,20 @@ struct ServerLibraryView: View {
             ToolbarItemGroup(placement: .primaryAction) {
                 Button("Deploy") { showDeploy = true }
                 Button("Scan QR") { showScanner = true }
-                Button("Import") { showImportJSON = true }
             }
         }
         .sheet(isPresented: $showScanner) {
             QRCodeScannerView { payload in
-                do {
-                    let imported = try HopperConf.parsePayloadJSON(payload)
-                    _ = vpn.importPayload(imported)
+                if vpn.handleScannedQR(payload) {
                     showScanner = false
-                } catch {
-                    vpn.errorMessage = error.localizedDescription
                 }
             }
         }
         .sheet(isPresented: $showDeploy) {
             DeployServerView()
         }
-        .sheet(isPresented: $showImportJSON) {
-            HopImportView { payload in
-                _ = vpn.importPayload(payload)
-                showImportJSON = false
-            }
+        .sheet(item: $importMode) { mode in
+            HopperImportSheet(mode: mode) { importMode = nil }
         }
     }
 

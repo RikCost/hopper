@@ -14,6 +14,7 @@ import androidx.compose.material3.Surface
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.navigation.compose.rememberNavController
+import com.aengix.hopper.data.HopperLanInvite
 import com.aengix.hopper.ui.HopperNavHost
 import com.aengix.hopper.ui.Routes
 import com.aengix.hopper.util.TunnelLog
@@ -121,14 +122,31 @@ class MainActivity : ComponentActivity() {
     private fun handleIncomingIntent(intent: Intent?) {
         if (intent == null) return
         when (intent.action) {
-            Intent.ACTION_VIEW -> intent.data?.let { readAndOffer(it) }
+            Intent.ACTION_VIEW -> intent.data?.let { uri ->
+                if (uri.scheme.equals(HopperLanInvite.SCHEME, ignoreCase = true)) {
+                    val invite = HopperLanInvite.parse(uri)
+                    if (invite != null) {
+                        vpnController.offerLanInvite(invite)
+                    } else {
+                        vpnController.setError("Not a valid Hopper remote-import link.")
+                    }
+                } else {
+                    readAndOffer(uri)
+                }
+            }
             Intent.ACTION_SEND -> {
                 val uri = intent.getParcelableExtraCompat<Uri>(Intent.EXTRA_STREAM)
                 if (uri != null) {
                     readAndOffer(uri)
                 } else {
-                    intent.getStringExtra(Intent.EXTRA_TEXT)?.toByteArray(Charsets.UTF_8)?.let {
-                        vpnController.offerHopperConfBytes(it)
+                    val text = intent.getStringExtra(Intent.EXTRA_TEXT)
+                    val invite = text?.let { HopperLanInvite.parse(it) }
+                    if (invite != null) {
+                        vpnController.offerLanInvite(invite)
+                    } else {
+                        text?.toByteArray(Charsets.UTF_8)?.let {
+                            vpnController.offerHopperConfBytes(it)
+                        }
                     }
                 }
             }

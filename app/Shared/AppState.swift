@@ -6,6 +6,30 @@ struct AppState: Codable, Equatable {
     var selectedChainID: UUID?
     var deployKeys: [DeploySSHKey] = []
 
+    enum CodingKeys: String, CodingKey {
+        case servers, chains, selectedChainID, deployKeys
+    }
+
+    init(
+        servers: [HopNodeProfile] = [],
+        chains: [HopChain] = [],
+        selectedChainID: UUID? = nil,
+        deployKeys: [DeploySSHKey] = []
+    ) {
+        self.servers = servers
+        self.chains = chains
+        self.selectedChainID = selectedChainID
+        self.deployKeys = deployKeys
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        servers = try container.decodeIfPresent([HopNodeProfile].self, forKey: .servers) ?? []
+        chains = try container.decodeIfPresent([HopChain].self, forKey: .chains) ?? []
+        selectedChainID = try container.decodeIfPresent(UUID.self, forKey: .selectedChainID)
+        deployKeys = try container.decodeIfPresent([DeploySSHKey].self, forKey: .deployKeys) ?? []
+    }
+
     var selectedChain: HopChain? {
         guard let selectedChainID else { return nil }
         return chains.first { $0.id == selectedChainID }
@@ -35,10 +59,44 @@ struct AppState: Codable, Equatable {
         deployKeys.append(key)
     }
 
+    /// Adds a key unless an existing library entry has the same public-key fingerprint.
+    @discardableResult
+    mutating func importDeployKey(_ key: DeploySSHKey) -> DeploySSHKey {
+        if let fingerprint = KeysLibraryMigration.fingerprint(privateKeyPEM: key.privateKey),
+           let existing = deployKeys.first(where: {
+               KeysLibraryMigration.fingerprint(privateKeyPEM: $0.privateKey) == fingerprint
+           }) {
+            return existing
+        }
+        var stored = key
+        stored.id = UUID()
+        if stored.createdAt.timeIntervalSince1970 == 0 {
+            stored.createdAt = Date()
+        }
+        deployKeys.append(stored)
+        return stored
+    }
+
+    mutating func renameDeployKey(id: UUID, name: String) {
+        guard let index = deployKeys.firstIndex(where: { $0.id == id }) else { return }
+        deployKeys[index].name = name
+    }
+
+    mutating func recordDeployKeyUse(id: UUID, server: HopNodeProfile) {
+        guard let index = deployKeys.firstIndex(where: { $0.id == id }) else { return }
+        deployKeys[index].recordAssignment(from: server)
+    }
+
     mutating func removeDeployKeys(at offsets: IndexSet) {
         for index in offsets.sorted(by: >) where deployKeys.indices.contains(index) {
+            guard deployKeys[index].canDelete(servers: servers) else { continue }
             deployKeys.remove(at: index)
         }
+    }
+
+    mutating func removeDeployKey(id: UUID) {
+        guard let key = deployKey(id: id), key.canDelete(servers: servers) else { return }
+        deployKeys.removeAll { $0.id == id }
     }
 
     func deployKey(id: UUID) -> DeploySSHKey? {

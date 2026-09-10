@@ -4,6 +4,7 @@ import java.net.Inet4Address
 import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.Socket
+import java.net.SocketAddress
 import javax.net.SocketFactory
 
 object IPv4Only {
@@ -32,17 +33,14 @@ object IPv4Only {
     }
 
     fun connectSocket(socket: Socket, host: String, port: Int, timeoutMs: Int = 60_000) {
-        bindAny(socket)
+        if (!socket.isBound) bindAny(socket)
         socket.connect(socketAddress(host, port), timeoutMs)
     }
 
     fun socketFactory(onProtect: ((Socket) -> Boolean)? = null): SocketFactory {
         return object : SocketFactory() {
-            private fun openSocket(): Socket {
-                val socket = Socket()
-                onProtect?.invoke(socket)
-                return socket
-            }
+            private fun openSocket(): Socket =
+                if (onProtect != null) ProtectedSocket(onProtect) else Socket()
 
             override fun createSocket(): Socket = openSocket()
 
@@ -86,5 +84,35 @@ object IPv4Only {
     fun isIPv4Packet(packet: ByteArray, length: Int = packet.size): Boolean {
         if (length < 1) return false
         return (packet[0].toInt() ushr 4) == 4
+    }
+
+    private class ProtectedSocket(
+        private val onProtect: (Socket) -> Boolean,
+    ) : Socket() {
+        init {
+            applyProtect()
+        }
+
+        private fun applyProtect() {
+            onProtect(this)
+        }
+
+        override fun bind(bindpoint: SocketAddress?) {
+            super.bind(bindpoint)
+            applyProtect()
+        }
+
+        override fun connect(endpoint: SocketAddress) {
+            connect(endpoint, 0)
+        }
+
+        override fun connect(endpoint: SocketAddress, timeout: Int) {
+            if (!isBound) {
+                bindAny(this)
+            }
+            applyProtect()
+            super.connect(endpoint, timeout)
+            applyProtect()
+        }
     }
 }

@@ -93,6 +93,8 @@ func run() throws {
         ("server_custom.hopperconf", customPassword, "server"),
         ("chain_default.hopperconf", nil, "chain"),
         ("chain_custom.hopperconf", customPassword, "chain"),
+        ("key_default.hopperconf", nil, "key"),
+        ("key_custom.hopperconf", customPassword, "key"),
     ]
 
     for (name, password, kind) in cases {
@@ -103,10 +105,13 @@ func run() throws {
         if kind == "server" {
             let server = payload["server"] as? [String: Any]
             try assertEqual(server?["host"] as? String, "203.0.113.10", "\(name) host")
-        } else {
+        } else if kind == "chain" {
             let hops = payload["hops"] as? [[String: Any]]
             try assertEqual(hops?.count, 2, "\(name) hop count")
             try assertEqual(payload["name"] as? String, "Interop Chain", "\(name) name")
+        } else {
+            let key = payload["key"] as? [String: Any]
+            try assertEqual(key?["name"] as? String, "interop-key", "\(name) key name")
         }
         print("ok  \(name)")
     }

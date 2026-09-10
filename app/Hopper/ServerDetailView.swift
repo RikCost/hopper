@@ -6,7 +6,7 @@ struct ServerDetailView: View {
     let serverID: UUID
 
     @State private var name: String = ""
-    @State private var showExport = false
+    @State private var exportMode: HopperExportMode?
     @State private var showDeleteConfirm = false
 
     private var server: HopNodeProfile? {
@@ -34,11 +34,8 @@ struct ServerDetailView: View {
                     }
 
                     Section("Share") {
-                        HStack {
-                            Button("Export…") { showExport = true }
-                            Spacer()
-                            Button("Delete", role: .destructive) { showDeleteConfirm = true }
-                        }
+                        HopperExportButtonsRow { exportMode = $0 }
+                        Button("Delete", role: .destructive) { showDeleteConfirm = true }
                     }
                 }
             } else {
@@ -50,9 +47,9 @@ struct ServerDetailView: View {
         .onAppear {
             name = server?.name ?? ""
         }
-        .sheet(isPresented: $showExport) {
+        .sheet(item: $exportMode) { mode in
             if let server {
-                ServerExportView(server: server)
+                ServerExportView(server: server, mode: mode)
             }
         }
         .alert("Delete server?", isPresented: $showDeleteConfirm) {

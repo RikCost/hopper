@@ -17,6 +17,7 @@ enum HopperConf {
     enum Kind: String {
         case server
         case chain
+        case key
     }
 
     enum Field {
@@ -35,11 +36,14 @@ enum HopperConf {
         static let name = "name"
         static let server = "server"
         static let hops = "hops"
+        static let key = "key"
+        static let privateKey = "private_key"
     }
 
     enum Payload {
         case server(HopNodeProfile)
         case chain(name: String, hops: [HopNodeProfile])
+        case key(DeploySSHKey)
     }
 
     enum ConfError: LocalizedError {
@@ -49,6 +53,7 @@ enum HopperConf {
         case decryptionFailed
         case encryptionFailed
         case emptyChain
+        case emptyKey
 
         var errorDescription: String? {
             switch self {
@@ -58,6 +63,7 @@ enum HopperConf {
             case .decryptionFailed: return "Could not decrypt — check the password."
             case .encryptionFailed: return "Could not encrypt the configuration."
             case .emptyChain: return "The chain has no servers to share."
+            case .emptyKey: return "The key has no private key material to share."
             }
         }
     }
@@ -76,6 +82,8 @@ enum HopperConf {
         case .chain(let name, _):
             raw = name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 ? "chain" : name
+        case .key(let key):
+            raw = key.trimmedName.isEmpty ? "key" : key.name
         }
         let safe = raw
             .replacingOccurrences(of: "/", with: "-")
@@ -103,6 +111,17 @@ enum HopperConf {
                 Field.name: name,
                 Field.hops: hops.map { HopProfileCodec.exportDictionary($0) },
             ]
+        case .key(let key):
+            let pem = key.privateKey.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !pem.isEmpty else { throw ConfError.emptyKey }
+            return [
+                Field.version: payloadVersion,
+                Field.kind: Kind.key.rawValue,
+                Field.key: [
+                    Field.name: key.name,
+                    Field.privateKey: key.privateKey,
+                ],
+            ]
         }
     }
 
@@ -117,7 +136,7 @@ enum HopperConf {
         switch payload {
         case .server(let profile):
             return HopQRExporter.exportJSON(profile)
-        case .chain:
+        case .chain, .key:
             return try exportPayloadJSON(payload)
         }
     }
@@ -142,6 +161,22 @@ enum HopperConf {
             }
             let hops = try hopsRaw.map { try HopProfileCodec.parseDictionary($0) }
             return .chain(name: name, hops: hops)
+        }
+
+        if kind == Kind.key.rawValue {
+            guard let keyObj = json[Field.key] as? [String: Any] else {
+                throw ConfError.invalidPayload
+            }
+            let pem = stringValue(in: keyObj, keys: [Field.privateKey, "privateKey"]) ?? ""
+            guard !pem.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                throw ConfError.emptyKey
+            }
+            return .key(
+                DeploySSHKey(
+                    name: stringValue(in: keyObj, keys: [Field.name]) ?? "",
+                    privateKey: pem
+                )
+            )
         }
 
         if kind == Kind.server.rawValue {

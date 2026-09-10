@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.aengix.hopper.data.DemoProfiles
 import com.aengix.hopper.data.HopperConf
+import com.aengix.hopper.data.HopperLanInvite
 import com.aengix.hopper.data.ProfileStore
 import com.aengix.hopper.model.AppState
 import com.aengix.hopper.model.ChainStatusReport
@@ -91,9 +92,32 @@ class VpnController(application: Application) : AndroidViewModel(application) {
         )
         updateState { state ->
             var next = state
-            result.newDeployKey?.let { next = next.addDeployKey(it) }
+            result.newDeployKey?.let { key ->
+                next = next.addDeployKey(key.recordAssignment(result.profile))
+            } ?: run {
+                val usedId = (auth as? com.aengix.hopper.provision.ServerDeployAuth.DeployKey)?.key?.id
+                if (usedId != null) {
+                    next = next.recordDeployKeyUse(usedId, result.profile)
+                }
+            }
             next.addServer(result.profile)
         }
+    }
+
+    fun addDeployKey(key: com.aengix.hopper.model.DeploySSHKey) {
+        updateState { it.addDeployKey(key) }
+    }
+
+    fun importDeployKey(key: com.aengix.hopper.model.DeploySSHKey) {
+        updateState { it.importDeployKey(key) }
+    }
+
+    fun renameDeployKey(id: String, name: String) {
+        updateState { it.renameDeployKey(id, name) }
+    }
+
+    fun deleteDeployKeys(ids: Set<String>) {
+        updateState { it.removeDeployKeys(ids) }
     }
 
     fun deleteServers(ids: Set<String>) {
@@ -143,17 +167,20 @@ class VpnController(application: Application) : AndroidViewModel(application) {
     }
 
     /** Apply a shared server or chain payload (new IDs minted for servers/chains). */
-    fun importPayload(payload: com.aengix.hopper.data.HopperConf.Payload): String {
+    fun importPayload(
+        payload: com.aengix.hopper.data.HopperConf.Payload,
+        announceChain: Boolean = true,
+    ): String {
         var message = ""
         var importedChainId: String? = null
         updateState { state ->
+            var next = state
             when (payload) {
                 is com.aengix.hopper.data.HopperConf.Payload.Server -> {
                     message = "Imported server ${payload.profile.displayName}."
-                    state.addServer(payload.profile)
+                    next.addServer(payload.profile)
                 }
                 is com.aengix.hopper.data.HopperConf.Payload.Chain -> {
-                    var next = state
                     val hopIDs = mutableListOf<String>()
                     for (hop in payload.hops) {
                         next = next.addServer(hop)
@@ -171,10 +198,16 @@ class VpnController(application: Application) : AndroidViewModel(application) {
                     message = "Imported chain $label with ${payload.hops.size} server(s)."
                     next
                 }
+                is com.aengix.hopper.data.HopperConf.Payload.Key -> {
+                    message = "Imported key ${payload.key.displayName}."
+                    next.importDeployKey(payload.key)
+                }
             }
         }
         importedChainId?.let { chainId ->
-            _chainImportPrompt.value = ChainImportPrompt(chainId = chainId, message = message)
+            if (announceChain) {
+                _chainImportPrompt.value = ChainImportPrompt(chainId = chainId, message = message)
+            }
         }
         return message
     }
@@ -197,6 +230,31 @@ class VpnController(application: Application) : AndroidViewModel(application) {
 
     private val _pendingHopperConfBytes = MutableStateFlow<ByteArray?>(null)
     val pendingHopperConfBytes: StateFlow<ByteArray?> = _pendingHopperConfBytes.asStateFlow()
+
+    private val _pendingLanInvite = MutableStateFlow<HopperLanInvite?>(null)
+    val pendingLanInvite: StateFlow<HopperLanInvite?> = _pendingLanInvite.asStateFlow()
+
+    fun offerLanInvite(invite: HopperLanInvite) {
+        _pendingLanInvite.value = invite
+    }
+
+    fun clearLanInvite() {
+        _pendingLanInvite.value = null
+    }
+
+    fun handleScannedQr(text: String): Boolean {
+        HopperLanInvite.parse(text)?.let {
+            _pendingLanInvite.value = it
+            return true
+        }
+        return runCatching {
+            importPayload(HopperConf.parsePayloadJson(text))
+            true
+        }.getOrElse {
+            _errorMessage.value = it.message
+            false
+        }
+    }
 
     fun offerHopperConfBytes(bytes: ByteArray) {
         if (HopperConf.isHopperConfFile(bytes)) {

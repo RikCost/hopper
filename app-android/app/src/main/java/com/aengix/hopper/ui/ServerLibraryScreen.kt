@@ -1,8 +1,7 @@
 package com.aengix.hopper.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,7 +11,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -51,43 +49,62 @@ fun ServerLibraryScreen(
         isPickMode -> emptyList()
         else -> state.servers
     }
-    var showImport by remember { mutableStateOf(false) }
+    var importMode by remember { mutableStateOf<HopperImportMode?>(null) }
     var showScanner by remember { mutableStateOf(false) }
     var showDeploy by remember { mutableStateOf(false) }
     var serverToDelete by remember { mutableStateOf<HopNodeProfile?>(null) }
+
+    if (importMode == HopperImportMode.Remote) {
+        HopperLanReceiveScreen(
+            vpn = vpn,
+            onBack = { importMode = null },
+        )
+        return
+    }
 
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(if (isPickMode) "Add server" else "Servers") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(
+                        onClick = onBack,
+                        modifier = Modifier.dPadActivate(onClick = onBack),
+                    ) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
-                    TextButton(onClick = { showDeploy = true }) {
+                    TextButton(
+                        onClick = { showDeploy = true },
+                        modifier = Modifier.dPadActivate { showDeploy = true },
+                    ) {
                         Text("Deploy")
                     }
-                    TextButton(onClick = {
-                        onRequestCameraPermission { showScanner = true }
-                    }) {
+                    TextButton(
+                        onClick = {
+                            onRequestCameraPermission { showScanner = true }
+                        },
+                        modifier = Modifier.dPadActivate {
+                            onRequestCameraPermission { showScanner = true }
+                        },
+                    ) {
                         Text("Scan QR")
-                    }
-                    TextButton(onClick = { showImport = true }) {
-                        Text("Import")
                     }
                 },
             )
         },
     ) { padding ->
-        if (displayedServers.isEmpty()) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding)
-                    .padding(16.dp),
-            ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(padding),
+        ) {
+            HopperImportButtons(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                onSelect = { importMode = it },
+            )
+            if (displayedServers.isEmpty()) {
                 Text(
                     if (isPickMode) {
                         "No servers — deploy a server, scan a QR code, or import a .hopperconf file, then tap to add to this chain."
@@ -95,57 +112,47 @@ fun ServerLibraryScreen(
                         "No servers — deploy a server, scan a QR code, or import a .hopperconf file."
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
-            }
-        } else {
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(padding),
-                contentPadding = PaddingValues(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                items(displayedServers, key = { it.id }) { server ->
-                    ServerLibraryRow(
-                        server = server,
-                        onClick = {
-                            val pickChainId = chainId
-                            if (pickChainId != null) {
-                                vpn.addServerToChain(pickChainId, server.id)
-                                onBack()
-                            } else {
-                                onServerDetail(server.id)
-                            }
-                        },
-                        onDelete = if (isPickMode) null else {
-                            { serverToDelete = server }
-                        },
-                    )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    items(displayedServers, key = { it.id }) { server ->
+                        ServerLibraryRow(
+                            server = server,
+                            onClick = {
+                                val pickChainId = chainId
+                                if (pickChainId != null) {
+                                    vpn.addServerToChain(pickChainId, server.id)
+                                    onBack()
+                                } else {
+                                    onServerDetail(server.id)
+                                }
+                            },
+                            onDelete = if (isPickMode) null else {
+                                { serverToDelete = server }
+                            },
+                        )
+                    }
                 }
             }
         }
     }
 
     serverToDelete?.let { server ->
-        AlertDialog(
-            onDismissRequest = { serverToDelete = null },
-            title = { Text("Delete server?") },
-            text = {
-                Text("Remove ${server.displayName} from the library. Chains that use this server will drop it.")
+        HopperConfirmDialog(
+            title = "Delete server?",
+            text = "Remove ${server.displayName} from the library. Chains that use this server will drop it.",
+            confirmLabel = "Delete",
+            destructive = true,
+            onConfirm = {
+                vpn.deleteServers(setOf(server.id))
+                serverToDelete = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    vpn.deleteServers(setOf(server.id))
-                    serverToDelete = null
-                }) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { serverToDelete = null }) {
-                    Text("Cancel")
-                }
-            },
+            onDismiss = { serverToDelete = null },
         )
     }
 
@@ -157,12 +164,13 @@ fun ServerLibraryScreen(
         )
     }
 
-    if (showImport) {
+    if (importMode == HopperImportMode.File || importMode == HopperImportMode.Paste) {
         ImportConfDialog(
-            onDismiss = { showImport = false },
+            initialTab = if (importMode == HopperImportMode.Paste) 1 else 0,
+            onDismiss = { importMode = null },
             onImport = { payload ->
                 vpn.importPayload(payload)
-                showImport = false
+                importMode = null
             },
             onError = vpn::setError,
         )
@@ -172,13 +180,8 @@ fun ServerLibraryScreen(
         QRScannerScreen(
             onDismiss = { showScanner = false },
             onScan = { payload ->
-                runCatching {
-                    com.aengix.hopper.data.HopperConf.parsePayloadJson(payload)
-                }.onSuccess { imported ->
-                    vpn.importPayload(imported)
+                if (vpn.handleScannedQr(payload)) {
                     showScanner = false
-                }.onFailure { error ->
-                    vpn.setError(error.message)
                 }
             },
         )
@@ -197,10 +200,13 @@ private fun ServerLibraryRow(
             supportingContent = {
                 Text("${server.trimmedUser}@${server.trimmedHost}:${server.port}")
             },
-            modifier = Modifier.clickable(onClick = onClick),
+            modifier = Modifier.dPadClickable(onClick = onClick),
             trailingContent = onDelete?.let { delete ->
                 {
-                    IconButton(onClick = delete) {
+                    IconButton(
+                        onClick = delete,
+                        modifier = Modifier.dPadActivate(onClick = delete),
+                    ) {
                         Icon(
                             Icons.Default.Delete,
                             contentDescription = "Delete server",

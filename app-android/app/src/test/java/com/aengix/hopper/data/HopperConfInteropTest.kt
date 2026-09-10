@@ -133,4 +133,33 @@ class HopperConfInteropTest {
             as HopperConf.Payload.Chain
         assertEquals("198.51.100.20", decoded.hops[1].host)
     }
+
+    private fun sampleKey(): com.aengix.hopper.model.DeploySSHKey =
+        com.aengix.hopper.model.DeploySSHKey(
+            name = "interop-key",
+            privateKey = "-----BEGIN OPENSSH PRIVATE KEY-----\nTESTKEY\n-----END OPENSSH PRIVATE KEY-----",
+        )
+
+    @Test
+    fun roundtrip_key_defaultPassword() {
+        val payload = HopperConf.Payload.Key(sampleKey())
+        val bytes = HopperConf.encryptFile(payload, null)
+        val decoded = HopperConf.decryptFile(bytes, null) as HopperConf.Payload.Key
+        assertEquals("interop-key", decoded.key.name)
+        assertTrue(decoded.key.privateKey.contains("PRIVATE KEY"))
+    }
+
+    @Test
+    fun decrypt_pythonGolden_keyDefault() {
+        val decoded = HopperConf.decryptFile(readVector("key_default.hopperconf"), null)
+            as HopperConf.Payload.Key
+        assertEquals("interop-key", decoded.key.name)
+    }
+
+    @Test
+    fun decrypt_pythonGolden_keyCustom() {
+        val decoded = HopperConf.decryptFile(readVector("key_custom.hopperconf"), customPassword)
+            as HopperConf.Payload.Key
+        assertTrue(decoded.key.privateKey.contains("PRIVATE KEY"))
+    }
 }

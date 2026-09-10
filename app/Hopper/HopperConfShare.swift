@@ -2,6 +2,76 @@ import SwiftUI
 import UniformTypeIdentifiers
 import UIKit
 
+enum HopperExportMode: String, Identifiable {
+    case qr
+    case file
+
+    var id: String { rawValue }
+
+    var navigationTitle: String {
+        switch self {
+        case .qr: return "QR code"
+        case .file: return "Export as file"
+        }
+    }
+}
+
+enum HopperImportMode: String, Identifiable {
+    case file
+    case paste
+    case remote
+
+    var id: String { rawValue }
+}
+
+struct HopperImportButtons: View {
+    var enabled: Bool = true
+    let onSelect: (HopperImportMode) -> Void
+
+    var body: some View {
+        VStack(spacing: 10) {
+            HStack(spacing: 12) {
+                importButton("Import from file", mode: .file)
+                importButton("Import from copy&paste", mode: .paste)
+            }
+            Button("Import remotely") { onSelect(.remote) }
+                .buttonStyle(.bordered)
+                .disabled(!enabled)
+                .frame(maxWidth: .infinity)
+        }
+    }
+
+    private func importButton(_ title: String, mode: HopperImportMode) -> some View {
+        Button(title) { onSelect(mode) }
+            .buttonStyle(.bordered)
+            .disabled(!enabled)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity)
+    }
+}
+
+struct HopperExportButtonsRow: View {
+    var enabled: Bool = true
+    let onSelect: (HopperExportMode) -> Void
+
+    var body: some View {
+        HStack(spacing: 12) {
+            modeButton("Export as file…", mode: .file)
+            modeButton("Show QR code…", mode: .qr)
+        }
+    }
+
+    private func modeButton(_ title: String, mode: HopperExportMode) -> some View {
+        Button(title) { onSelect(mode) }
+            .buttonStyle(.bordered)
+            .disabled(!enabled)
+            .lineLimit(2)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity)
+    }
+}
+
 extension UTType {
     static var hopperConf: UTType {
         UTType(filenameExtension: HopperConf.fileExtension) ?? UTType(exportedAs: HopperConf.uti)

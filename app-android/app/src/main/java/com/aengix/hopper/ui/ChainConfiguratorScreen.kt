@@ -1,7 +1,6 @@
 package com.aengix.hopper.ui
 
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -15,7 +14,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -49,12 +47,21 @@ fun ChainConfiguratorScreen(
     onBack: () -> Unit,
     onChainDetail: (String) -> Unit,
     onOpenServers: () -> Unit,
+    onOpenKeys: () -> Unit,
     onRequestCameraPermission: (onGranted: () -> Unit) -> Unit,
 ) {
     val state by vpn.state.collectAsState()
     var chainToDelete by remember { mutableStateOf<HopChain?>(null) }
-    var showImport by remember { mutableStateOf(false) }
+    var importMode by remember { mutableStateOf<HopperImportMode?>(null) }
     var showScanner by remember { mutableStateOf(false) }
+
+    if (importMode == HopperImportMode.Remote) {
+        HopperLanReceiveScreen(
+            vpn = vpn,
+            onBack = { importMode = null },
+        )
+        return
+    }
 
     Scaffold(
         topBar = {
@@ -76,13 +83,28 @@ fun ChainConfiguratorScreen(
             verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             item {
-                Button(onClick = onOpenServers, modifier = Modifier.fillMaxWidth()) {
+                Button(
+                    onClick = onOpenServers,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .dPadActivate(onClick = onOpenServers),
+                ) {
                     Text("Server library")
                 }
             }
             item {
+                Button(
+                    onClick = onOpenKeys,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .dPadActivate(onClick = onOpenKeys),
+                ) {
+                    Text("Keys library")
+                }
+            }
+            item {
                 Text(
-                    "Manage individual servers in the library, or scan / import a shared chain or server below.",
+                    "Manage servers and deploy keys, or scan / import a shared chain, server, or key below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -115,64 +137,55 @@ fun ChainConfiguratorScreen(
                         val id = vpn.addChain()
                         vpn.selectChain(id)
                     },
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .dPadActivate {
+                            val id = vpn.addChain()
+                            vpn.selectChain(id)
+                        },
                 ) {
                     Text("New chain")
                 }
             }
             item {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                OutlinedButton(
+                    onClick = {
+                        onRequestCameraPermission { showScanner = true }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .dPadActivate { onRequestCameraPermission { showScanner = true } },
                 ) {
-                    OutlinedButton(
-                        onClick = {
-                            onRequestCameraPermission { showScanner = true }
-                        },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Scan QR")
-                    }
-                    OutlinedButton(
-                        onClick = { showImport = true },
-                        modifier = Modifier.weight(1f),
-                    ) {
-                        Text("Import")
-                    }
+                    Text("Scan QR")
                 }
+            }
+            item {
+                HopperImportButtons(onSelect = { importMode = it })
             }
         }
     }
 
     chainToDelete?.let { chain ->
-        AlertDialog(
-            onDismissRequest = { chainToDelete = null },
-            title = { Text("Delete chain?") },
-            text = {
-                Text("Remove ${chain.displayName} from the library. Servers in your library are kept.")
+        HopperConfirmDialog(
+            title = "Delete chain?",
+            text = "Remove ${chain.displayName} from the library. Servers in your library are kept.",
+            confirmLabel = "Delete",
+            destructive = true,
+            onConfirm = {
+                vpn.deleteChains(setOf(chain.id))
+                chainToDelete = null
             },
-            confirmButton = {
-                TextButton(onClick = {
-                    vpn.deleteChains(setOf(chain.id))
-                    chainToDelete = null
-                }) {
-                    Text("Delete")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { chainToDelete = null }) {
-                    Text("Cancel")
-                }
-            },
+            onDismiss = { chainToDelete = null },
         )
     }
 
-    if (showImport) {
+    if (importMode == HopperImportMode.File || importMode == HopperImportMode.Paste) {
         ImportConfDialog(
-            onDismiss = { showImport = false },
+            initialTab = if (importMode == HopperImportMode.Paste) 1 else 0,
+            onDismiss = { importMode = null },
             onImport = { payload ->
                 vpn.importPayload(payload)
-                showImport = false
+                importMode = null
             },
             onError = vpn::setError,
         )
@@ -182,13 +195,8 @@ fun ChainConfiguratorScreen(
         QRScannerScreen(
             onDismiss = { showScanner = false },
             onScan = { payload ->
-                runCatching {
-                    com.aengix.hopper.data.HopperConf.parsePayloadJson(payload)
-                }.onSuccess { imported ->
-                    vpn.importPayload(imported)
+                if (vpn.handleScannedQr(payload)) {
                     showScanner = false
-                }.onFailure { error ->
-                    vpn.setError(error.message)
                 }
             },
         )
@@ -236,18 +244,24 @@ private fun ChainLibraryRow(
                 }
             },
             supportingContent = { Text(summary) },
-            modifier = Modifier.clickable(onClick = onClick),
+            modifier = Modifier.dPadClickable(onClick = onClick),
             trailingContent = {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     if (!selected) {
-                        TextButton(onClick = onUse) {
+                        TextButton(
+                            onClick = onUse,
+                            modifier = Modifier.dPadActivate(onClick = onUse),
+                        ) {
                             Text("Use")
                         }
                     }
-                    IconButton(onClick = onDelete) {
+                    IconButton(
+                        onClick = onDelete,
+                        modifier = Modifier.dPadActivate(onClick = onDelete),
+                    ) {
                         Icon(
                             Icons.Default.Delete,
                             contentDescription = "Delete chain",

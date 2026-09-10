@@ -11,6 +11,10 @@ struct HopperApp: App {
                 .onOpenURL { url in
                     vpn.handleIncomingHopperConfURL(url)
                 }
+                .sheet(item: $vpn.pendingLanInvite) { invite in
+                    HopperLanSendView(invite: invite)
+                        .environmentObject(vpn)
+                }
         }
     }
 }

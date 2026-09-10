@@ -15,6 +15,7 @@ from hopperconf import (
     encrypt_payload,
     resolved_password,
     sample_chain_payload,
+    sample_key_payload,
     sample_server_payload,
 )
 
@@ -49,6 +50,14 @@ class HopperConfTests(unittest.TestCase):
         self.assertEqual(decoded["name"], "Interop Chain")
         self.assertEqual(len(decoded["hops"]), 2)
 
+    def test_roundtrip_key_default_password(self):
+        payload = sample_key_payload()
+        blob = encrypt_json_file(payload, password=None)
+        decoded = decrypt_json_file(blob, password=None)
+        self.assertEqual(decoded["kind"], "key")
+        self.assertEqual(decoded["key"]["name"], "interop-key")
+        self.assertIn("PRIVATE KEY", decoded["key"]["private_key"])
+
     def test_wrong_password_fails(self):
         blob = encrypt_json_file(sample_server_payload(), password="a")
         with self.assertRaises(Exception):
@@ -79,6 +88,8 @@ class HopperConfTests(unittest.TestCase):
             ("server_custom.hopperconf", CUSTOM_PASSWORD, "server"),
             ("chain_default.hopperconf", None, "chain"),
             ("chain_custom.hopperconf", CUSTOM_PASSWORD, "chain"),
+            ("key_default.hopperconf", None, "key"),
+            ("key_custom.hopperconf", CUSTOM_PASSWORD, "key"),
         ]
         for name, password, kind in cases:
             path = VECTORS / name
@@ -90,6 +101,7 @@ class HopperConfTests(unittest.TestCase):
         """Re-encrypting with fixed salt/nonce must match committed vectors."""
         server = sample_server_payload()
         chain = sample_chain_payload()
+        key = sample_key_payload()
         expected = {
             "server_default.hopperconf": encrypt_json_file(
                 server, None, salt=FIXED_SALT, nonce=FIXED_NONCE
@@ -102,6 +114,12 @@ class HopperConfTests(unittest.TestCase):
             ),
             "chain_custom.hopperconf": encrypt_json_file(
                 chain, CUSTOM_PASSWORD, salt=FIXED_SALT, nonce=FIXED_NONCE
+            ),
+            "key_default.hopperconf": encrypt_json_file(
+                key, None, salt=FIXED_SALT, nonce=FIXED_NONCE
+            ),
+            "key_custom.hopperconf": encrypt_json_file(
+                key, CUSTOM_PASSWORD, salt=FIXED_SALT, nonce=FIXED_NONCE
             ),
         }
         for name, blob in expected.items():
@@ -117,6 +135,7 @@ def generate_vectors() -> None:
     VECTORS.mkdir(parents=True, exist_ok=True)
     server = sample_server_payload()
     chain = sample_chain_payload()
+    key = sample_key_payload()
     files = {
         "server_default.hopperconf": encrypt_json_file(
             server, None, salt=FIXED_SALT, nonce=FIXED_NONCE
@@ -130,6 +149,12 @@ def generate_vectors() -> None:
         "chain_custom.hopperconf": encrypt_json_file(
             chain, CUSTOM_PASSWORD, salt=FIXED_SALT, nonce=FIXED_NONCE
         ),
+        "key_default.hopperconf": encrypt_json_file(
+            key, None, salt=FIXED_SALT, nonce=FIXED_NONCE
+        ),
+        "key_custom.hopperconf": encrypt_json_file(
+            key, CUSTOM_PASSWORD, salt=FIXED_SALT, nonce=FIXED_NONCE
+        ),
     }
     meta = {
         "salt_hex": FIXED_SALT.hex(),
@@ -141,6 +166,8 @@ def generate_vectors() -> None:
             "server_custom.hopperconf": {"password": CUSTOM_PASSWORD, "kind": "server"},
             "chain_default.hopperconf": {"password": None, "kind": "chain"},
             "chain_custom.hopperconf": {"password": CUSTOM_PASSWORD, "kind": "chain"},
+            "key_default.hopperconf": {"password": None, "kind": "key"},
+            "key_custom.hopperconf": {"password": CUSTOM_PASSWORD, "kind": "key"},
         },
     }
     (VECTORS / "manifest.json").write_text(

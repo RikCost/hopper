@@ -5,7 +5,7 @@ struct HopImportView: View {
     @Environment(\.dismiss) private var dismiss
     let onImport: (HopperConf.Payload) -> Void
 
-    @State private var mode: Mode = .file
+    @State private var mode: Mode
     @State private var jsonText = ""
     @State private var password = ""
     @State private var errorMessage: String?
@@ -16,6 +16,11 @@ struct HopImportView: View {
         case file = "File"
         case paste = "Paste JSON"
         var id: String { rawValue }
+    }
+
+    init(mode: Mode = .file, onImport: @escaping (HopperConf.Payload) -> Void) {
+        self.onImport = onImport
+        _mode = State(initialValue: mode)
     }
 
     var body: some View {

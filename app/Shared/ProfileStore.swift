@@ -23,12 +23,21 @@ enum ProfileStore {
             return AppState()
         }
         if var state = try? JSONDecoder().decode(AppState.self, from: data) {
+            var shouldSave = false
             if state.chains.isEmpty, !state.servers.isEmpty {
                 let id = state.addChain(name: "Default")
                 if let index = state.chains.firstIndex(where: { $0.id == id }) {
                     state.chains[index].hopIDs = state.servers.map(\.id)
                 }
                 state.selectedChainID = id
+                shouldSave = true
+            }
+            let migrated = KeysLibraryMigration.migrate(state)
+            if migrated != state {
+                state = migrated
+                shouldSave = true
+            }
+            if shouldSave {
                 save(state)
             }
             return state

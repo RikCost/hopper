@@ -8,6 +8,21 @@
 	<string>ɹǝddoH</string>
 	<key>NSCameraUsageDescription</key>
 	<string>Scan hop configuration QR codes.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Hopper uses the local network so another device can send you a chain, server, or key.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>com.aengix.hopper.conf</string>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>hopperconf</string>
+			</array>
+		</dict>
+	</array>
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>

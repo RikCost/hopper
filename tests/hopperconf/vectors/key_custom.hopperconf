@@ -1,0 +1,10 @@
+{
+  "alg": "aes-256-gcm",
+  "data": "Afe83AYUyOidUg4oVrg+4GFtaAOd4LNfW6mzTSj7j4uCKcjUxm6QDG77ZoIDx2ErYP4dAFyoSMyMTeaanFyts+Q48kkIY3JHoaerESDEUY+GE1F8uwZ4Ef0Cm33fy7LbiL5WbWRejJxFmQlDcbwGAKR30oyA92Q8CbaJ7h/LAPBJrYtB2Un+7fDPyISWuGqaDOMtPIOv0iPh13dh+Mkkq8A=",
+  "fmt": "hopperconf",
+  "iter": 210000,
+  "kdf": "pbkdf2-sha256",
+  "nonce": "EBESExQVFhcYGRob",
+  "salt": "AAECAwQFBgcICQoLDA0ODw==",
+  "v": 1
+}

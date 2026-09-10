@@ -43,7 +43,12 @@ class IPTunnelEngine(
         while (running.get() && !Thread.currentThread().isInterrupted) {
             try {
                 val read = tunInput.read(buffer)
-                if (read <= 0) {
+                if (read < 0) {
+                    if (!running.get()) return
+                    fail("TUN closed")
+                    return
+                }
+                if (read == 0) {
                     Thread.sleep(5)
                     continue
                 }

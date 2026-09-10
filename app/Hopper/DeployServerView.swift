@@ -55,12 +55,12 @@ struct DeployServerView: View {
                         switch authMode {
                         case .password:
                             SecureField("Password", text: $password)
-                            Text("A new deploy key is generated, saved in the key library, and installed on the server.")
+                            Text("A new deploy key is generated, saved in the Keys library, and installed on the server.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         case .savedKey:
                             if vpn.state.deployKeys.isEmpty {
-                                Text("No saved deploy keys yet. Use password once to create one.")
+                                Text("No keys in the library yet. Generate or paste one in Keys library, or use password once.")
                                     .font(.footnote)
                                     .foregroundStyle(.secondary)
                             } else {

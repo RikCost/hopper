@@ -1,16 +1,11 @@
 package com.aengix.hopper.ui
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ListItem
@@ -19,7 +14,6 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -51,17 +45,26 @@ fun HomeScreen(
     val serverUpdatePrompt by vpn.serverUpdatePrompt.collectAsState()
     val pendingHopperConf by vpn.pendingHopperConfBytes.collectAsState()
     var showConnectOptions by remember { mutableStateOf(false) }
-    var showShareChain by remember { mutableStateOf(false) }
-    var showImport by remember { mutableStateOf(false) }
+    var shareMode by remember { mutableStateOf<HopperExportMode?>(null) }
+    var importMode by remember { mutableStateOf<HopperImportMode?>(null) }
     var showScanner by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val hops = state.activeHops
 
-    if (showShareChain) {
+    shareMode?.let { mode ->
         ChainExportScreen(
             chainName = state.selectedChain?.name.orEmpty(),
             hops = hops,
-            onBack = { showShareChain = false },
+            mode = mode,
+            onBack = { shareMode = null },
+        )
+        return
+    }
+
+    if (importMode == HopperImportMode.Remote) {
+        HopperLanReceiveScreen(
+            vpn = vpn,
+            onBack = { importMode = null },
         )
         return
     }
@@ -70,13 +73,8 @@ fun HomeScreen(
         QRScannerScreen(
             onDismiss = { showScanner = false },
             onScan = { payload ->
-                runCatching {
-                    com.aengix.hopper.data.HopperConf.parsePayloadJson(payload)
-                }.onSuccess { imported ->
-                    vpn.importPayload(imported)
+                if (vpn.handleScannedQr(payload)) {
                     showScanner = false
-                }.onFailure { error ->
-                    vpn.setError(error.message)
                 }
             },
         )
@@ -109,7 +107,7 @@ fun HomeScreen(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
                         .padding(top = 4.dp)
-                        .clickable { onChainDetail(chain.id) },
+                        .dPadClickable { onChainDetail(chain.id) },
                 )
             } else {
                 Text(
@@ -122,7 +120,8 @@ fun HomeScreen(
                 onClick = onConfigureChains,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(top = 8.dp),
+                    .padding(top = 8.dp)
+                    .dPadActivate(onClick = onConfigureChains),
             ) {
                 Text("Configure chains")
             }
@@ -145,65 +144,58 @@ fun HomeScreen(
 
             val connected = vpnStatus == VpnStatus.Connected
             val busy = vpnStatus == VpnStatus.Connecting || vpnStatus == VpnStatus.Disconnecting
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-            ) {
-                Button(
-                    onClick = {
-                        if (connected || busy) {
-                            vpn.disconnect()
-                        } else {
-                            showConnectOptions = true
-                        }
-                    },
-                    enabled = !busy && entry != null && provisionStatus == null,
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text(if (connected) "Disconnect" else "Connect")
-                }
-                Spacer(modifier = Modifier.width(12.dp))
-                OutlinedButton(
-                    onClick = { showShareChain = true },
-                    enabled = hops.isNotEmpty(),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Share…")
-                }
-            }
-
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp),
-                horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(8.dp),
-            ) {
-                OutlinedButton(
-                    onClick = {
-                        onRequestCameraPermission { showScanner = true }
-                    },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Scan QR")
-                }
-                OutlinedButton(
-                    onClick = { showImport = true },
-                    modifier = Modifier.weight(1f),
-                ) {
-                    Text("Import")
-                }
-            }
-
             Text(
                 statusLabel(vpnStatus),
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 4.dp),
+                modifier = Modifier.padding(top = 8.dp),
             )
-
             provisionStatus?.let {
                 Text(it, color = MaterialTheme.colorScheme.tertiary, modifier = Modifier.padding(top = 4.dp))
+            }
+            errorMessage?.let {
+                Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(top = 4.dp))
+            }
+            val onConnectClick = {
+                if (connected || busy) {
+                    vpn.disconnect()
+                } else {
+                    showConnectOptions = true
+                }
+            }
+            Button(
+                onClick = onConnectClick,
+                enabled = !busy && entry != null && provisionStatus == null,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .dPadActivate(
+                        enabled = !busy && entry != null && provisionStatus == null,
+                        onClick = onConnectClick,
+                    ),
+            ) {
+                Text(if (connected) "Disconnect" else "Connect")
+            }
+            HopperExportButtonsRow(
+                enabled = hops.isNotEmpty(),
+                modifier = Modifier.padding(top = 8.dp),
+                onSelect = { shareMode = it },
+            )
+
+            HopperImportButtons(
+                modifier = Modifier.padding(top = 8.dp),
+                onSelect = { importMode = it },
+            )
+            OutlinedButton(
+                onClick = {
+                    onRequestCameraPermission { showScanner = true }
+                },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .dPadActivate { onRequestCameraPermission { showScanner = true } },
+            ) {
+                Text("Scan QR")
             }
 
             if (hops.isNotEmpty()) {
@@ -217,64 +209,47 @@ fun HomeScreen(
                     )
                 }
             }
-
-            errorMessage?.let {
-                Text("Error", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(top = 16.dp))
-                Text(it, color = MaterialTheme.colorScheme.error)
-            }
         }
     }
 
-    if (showImport) {
+    if (importMode == HopperImportMode.File || importMode == HopperImportMode.Paste) {
         ImportConfDialog(
-            onDismiss = { showImport = false },
+            initialTab = if (importMode == HopperImportMode.Paste) 1 else 0,
+            onDismiss = { importMode = null },
             onImport = { payload ->
                 vpn.importPayload(payload)
-                showImport = false
+                importMode = null
             },
             onError = vpn::setError,
         )
     }
 
     if (showConnectOptions) {
-        AlertDialog(
-            onDismissRequest = { showConnectOptions = false },
-            title = { Text("Connect to chain") },
-            text = {
-                Column {
-                    Text(
-                        "Restart hopperd on all nodes if you've changed the chain or are having connection issues on the servers. Leave off for faster reconnects.",
-                    )
-                    TextButton(onClick = {
-                        showConnectOptions = false
-                        onRequestVpnConnect(false)
-                    }) { Text("Connect") }
-                    TextButton(onClick = {
-                        showConnectOptions = false
-                        onRequestVpnConnect(true)
-                    }) { Text("Connect & restart hopperd") }
-                    TextButton(onClick = { showConnectOptions = false }) { Text("Cancel") }
-                }
-            },
-            confirmButton = {},
+        HopperOptionsDialog(
+            title = "Connect to chain",
+            text = "Restart hopperd on all nodes if you've changed the chain or are having connection issues on the servers. Leave off for faster reconnects.",
+            onDismiss = { showConnectOptions = false },
+            actions = listOf(
+                HopperDialogAction("Connect") {
+                    showConnectOptions = false
+                    onRequestVpnConnect(false)
+                },
+                HopperDialogAction("Connect & restart hopperd") {
+                    showConnectOptions = false
+                    onRequestVpnConnect(true)
+                },
+                HopperDialogAction("Cancel") { showConnectOptions = false },
+            ),
         )
     }
 
     serverUpdatePrompt?.let { prompt ->
-        AlertDialog(
-            onDismissRequest = { vpn.cancelServerUpdate() },
-            title = { Text("Update servers?") },
-            text = {
-                Text("Server software is older than app v${prompt.targetVersion}. Update ${prompt.hops.size} hop(s) before connecting?")
-            },
-            confirmButton = {
-                TextButton(onClick = { vpn.confirmServerUpdate() }) {
-                    Text("Update")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { vpn.cancelServerUpdate() }) { Text("Cancel") }
-            },
+        HopperConfirmDialog(
+            title = "Update servers?",
+            text = "Server software is older than app v${prompt.targetVersion}. Update ${prompt.hops.size} hop(s) before connecting?",
+            confirmLabel = "Update",
+            onConfirm = { vpn.confirmServerUpdate() },
+            onDismiss = { vpn.cancelServerUpdate() },
         )
     }
 
@@ -304,7 +279,7 @@ private fun ChainPicker(
             },
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable { onSelect(chain.id) },
+                .dPadClickable { onSelect(chain.id) },
         )
     }
 }

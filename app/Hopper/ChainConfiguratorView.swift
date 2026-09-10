@@ -4,7 +4,7 @@ struct ChainConfiguratorView: View {
     @EnvironmentObject private var vpn: VPNController
     @State private var chainToDelete: HopChain?
     @State private var showScanner = false
-    @State private var showImport = false
+    @State private var importMode: HopperImportMode?
 
     var body: some View {
         List {
@@ -14,8 +14,13 @@ struct ChainConfiguratorView: View {
                 } label: {
                     Label("Server library", systemImage: "server.rack")
                 }
+                NavigationLink {
+                    KeyLibraryView()
+                } label: {
+                    Label("Keys library", systemImage: "key")
+                }
             } footer: {
-                Text("Manage individual servers in the library, or scan / import a shared chain or server below.")
+                Text("Manage servers and deploy keys, or scan / import a shared chain, server, or key below.")
             }
 
             Section("Chains") {
@@ -71,11 +76,7 @@ struct ChainConfiguratorView: View {
                     Label("Scan QR", systemImage: "qrcode.viewfinder")
                 }
 
-                Button {
-                    showImport = true
-                } label: {
-                    Label("Import", systemImage: "square.and.arrow.down")
-                }
+                HopperImportButtons { importMode = $0 }
             }
         }
         .navigationTitle("Chains")
@@ -86,20 +87,13 @@ struct ChainConfiguratorView: View {
         }
         .sheet(isPresented: $showScanner) {
             QRCodeScannerView { payload in
-                do {
-                    let imported = try HopperConf.parsePayloadJSON(payload)
-                    _ = vpn.importPayload(imported)
+                if vpn.handleScannedQR(payload) {
                     showScanner = false
-                } catch {
-                    vpn.errorMessage = error.localizedDescription
                 }
             }
         }
-        .sheet(isPresented: $showImport) {
-            HopImportView { payload in
-                _ = vpn.importPayload(payload)
-                showImport = false
-            }
+        .sheet(item: $importMode) { mode in
+            HopperImportSheet(mode: mode) { importMode = nil }
         }
         .alert("Delete chain?", isPresented: Binding(
             get: { chainToDelete != nil },

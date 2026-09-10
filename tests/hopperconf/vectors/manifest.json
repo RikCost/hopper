@@ -19,6 +19,14 @@
     "chain_custom.hopperconf": {
       "password": "test-password-🔐",
       "kind": "chain"
+    },
+    "key_default.hopperconf": {
+      "password": null,
+      "kind": "key"
+    },
+    "key_custom.hopperconf": {
+      "password": "test-password-🔐",
+      "kind": "key"
     }
   }
 }

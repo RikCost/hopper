@@ -42,12 +42,19 @@ object ProfileStore {
             return AppState()
         }
 
-        runCatching { json.decodeFromString<AppState>(text) }.onSuccess { state ->
+        runCatching { json.decodeFromString<AppState>(text) }.onSuccess { decoded ->
+            var state = decoded
+            var shouldSave = false
             if (state.chains.isEmpty() && state.servers.isNotEmpty()) {
-                val migrated = AppState.fromLegacyHops(state.servers)
-                save(migrated)
-                return migrated
+                state = AppState.fromLegacyHops(state.servers)
+                shouldSave = true
             }
+            val migrated = KeysLibraryMigration.migrate(state)
+            if (migrated != state) {
+                state = migrated
+                shouldSave = true
+            }
+            if (shouldSave) save(state)
             return state
         }
 

@@ -1,8 +1,5 @@
 package com.aengix.hopper.ui
 
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -20,11 +17,14 @@ object Routes {
     const val CHAIN_DETAIL = "chain/{chainId}"
     const val SERVERS = "servers?chainId={chainId}"
     const val SERVER_DETAIL = "server/{serverId}"
+    const val KEYS = "keys"
+    const val KEY_DETAIL = "key/{keyId}"
 
     fun chainDetail(chainId: String) = "chain/$chainId"
     fun servers(chainId: String? = null) =
         if (chainId != null) "servers?chainId=$chainId" else "servers"
     fun serverDetail(serverId: String) = "server/$serverId"
+    fun keyDetail(keyId: String) = "key/$keyId"
 }
 
 @Composable
@@ -36,6 +36,16 @@ fun HopperNavHost(
     startDestination: String = Routes.HOME,
 ) {
     val chainImportPrompt by vpn.chainImportPrompt.collectAsState()
+
+    val pendingLanInvite by vpn.pendingLanInvite.collectAsState()
+    pendingLanInvite?.let { invite ->
+        HopperLanSendScreen(
+            vpn = vpn,
+            invite = invite,
+            onBack = { vpn.clearLanInvite() },
+        )
+        return
+    }
 
     NavHost(navController = navController, startDestination = startDestination) {
         composable(Routes.HOME) {
@@ -57,6 +67,7 @@ fun HopperNavHost(
                     navController.navigate(Routes.chainDetail(chainId))
                 },
                 onOpenServers = { navController.navigate(Routes.servers()) },
+                onOpenKeys = { navController.navigate(Routes.KEYS) },
                 onRequestCameraPermission = onRequestCameraPermission,
             )
         }
@@ -98,30 +109,41 @@ fun HopperNavHost(
                 onBack = { navController.popBackStack() },
             )
         }
+        composable(Routes.KEYS) {
+            KeyLibraryScreen(
+                vpn = vpn,
+                onBack = { navController.popBackStack() },
+                onKeyDetail = { keyId ->
+                    navController.navigate(Routes.keyDetail(keyId))
+                },
+                onRequestCameraPermission = onRequestCameraPermission,
+            )
+        }
+        composable(Routes.KEY_DETAIL) { backStackEntry ->
+            val keyId = backStackEntry.arguments?.getString("keyId").orEmpty()
+            KeyDetailScreen(
+                vpn = vpn,
+                keyId = keyId,
+                onBack = { navController.popBackStack() },
+            )
+        }
     }
 
     chainImportPrompt?.let { prompt ->
-        AlertDialog(
-            onDismissRequest = { vpn.dismissChainImportPrompt() },
-            title = { Text("Chain imported") },
-            text = { Text(prompt.message) },
-            confirmButton = {
-                TextButton(onClick = {
-                    vpn.dismissChainImportPrompt()
-                    navController.navigate(Routes.HOME) {
-                        popUpTo(Routes.HOME) { inclusive = false }
-                        launchSingleTop = true
-                    }
-                    onRequestVpnConnect(false)
-                }) {
-                    Text("Connect")
+        HopperConfirmDialog(
+            title = "Chain imported",
+            text = prompt.message,
+            confirmLabel = "Connect",
+            dismissLabel = "Close",
+            onConfirm = {
+                vpn.dismissChainImportPrompt()
+                navController.navigate(Routes.HOME) {
+                    popUpTo(Routes.HOME) { inclusive = false }
+                    launchSingleTop = true
                 }
+                onRequestVpnConnect(false)
             },
-            dismissButton = {
-                TextButton(onClick = { vpn.dismissChainImportPrompt() }) {
-                    Text("Close")
-                }
-            },
+            onDismiss = { vpn.dismissChainImportPrompt() },
         )
     }
 }

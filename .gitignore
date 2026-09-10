@@ -14,4 +14,4 @@ app-android/.gradle/
 app-android/local.properties
 app-android/keystore.properties
 tests/hopperconf/.venv/
-
+tests/hopperconf/__pycache__/

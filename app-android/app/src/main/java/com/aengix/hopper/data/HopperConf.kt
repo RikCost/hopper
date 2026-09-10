@@ -1,5 +1,6 @@
 package com.aengix.hopper.data
 
+import com.aengix.hopper.model.DeploySSHKey
 import com.aengix.hopper.model.HopConstants
 import com.aengix.hopper.model.HopNodeProfile
 import org.bouncycastle.crypto.digests.SHA256Digest
@@ -41,11 +42,14 @@ object HopperConf {
         const val NAME = "name"
         const val SERVER = "server"
         const val HOPS = "hops"
+        const val KEY = "key"
+        const val PRIVATE_KEY = "private_key"
     }
 
     sealed class Payload {
         data class Server(val profile: HopNodeProfile) : Payload()
         data class Chain(val name: String, val hops: List<HopNodeProfile>) : Payload()
+        data class Key(val key: DeploySSHKey) : Payload()
     }
 
     sealed class ConfError(message: String) : Exception(message) {
@@ -55,6 +59,7 @@ object HopperConf {
         data object DecryptionFailed : ConfError("Could not decrypt — check the password.")
         data object EncryptionFailed : ConfError("Could not encrypt the configuration.")
         data object EmptyChain : ConfError("The chain has no servers to share.")
+        data object EmptyKey : ConfError("The key has no private key material to share.")
     }
 
     fun resolvedPassword(password: String?): String {
@@ -66,6 +71,7 @@ object HopperConf {
         val raw = when (payload) {
             is Payload.Server -> payload.profile.displayName
             is Payload.Chain -> payload.name.trim().ifEmpty { "chain" }
+            is Payload.Key -> payload.key.trimmedName.ifEmpty { "key" }
         }
         val safe = raw.replace('/', '-').replace(':', '-').trim().ifEmpty { "hopper" }
         return "${safe.take(40)}.$FILE_EXTENSION"
@@ -89,6 +95,17 @@ object HopperConf {
                     })
                 }
             }
+            is Payload.Key -> {
+                if (payload.key.privateKey.trim().isEmpty()) throw ConfError.EmptyKey
+                JSONObject().apply {
+                    put(Field.VERSION, PAYLOAD_VERSION)
+                    put(Field.KIND, "key")
+                    put(Field.KEY, JSONObject().apply {
+                        put(Field.NAME, payload.key.name)
+                        put(Field.PRIVATE_KEY, payload.key.privateKey)
+                    })
+                }
+            }
         }
     }
 
@@ -98,7 +115,7 @@ object HopperConf {
     /** QR uses unencrypted payload. Servers stay as legacy hop-profile v2. */
     fun qrPayloadJson(payload: Payload): String = when (payload) {
         is Payload.Server -> HopQRExporter.exportJson(payload.profile)
-        is Payload.Chain -> exportPayloadJson(payload)
+        is Payload.Chain, is Payload.Key -> exportPayloadJson(payload)
     }
 
     fun parsePayloadJson(text: String): Payload {
@@ -127,6 +144,19 @@ object HopperConf {
             "server" -> {
                 val serverObj = json.optJSONObject(Field.SERVER) ?: throw ConfError.InvalidPayload
                 return Payload.Server(HopProfileCodec.parseObject(serverObj))
+            }
+            "key" -> {
+                val keyObj = json.optJSONObject(Field.KEY) ?: throw ConfError.InvalidPayload
+                val pem = keyObj.optString(Field.PRIVATE_KEY).ifEmpty {
+                    keyObj.optString("privateKey")
+                }
+                if (pem.trim().isEmpty()) throw ConfError.EmptyKey
+                return Payload.Key(
+                    DeploySSHKey(
+                        name = keyObj.optString(Field.NAME, ""),
+                        privateKey = pem,
+                    ),
+                )
             }
             else -> return Payload.Server(HopProfileCodec.parseObject(json))
         }
