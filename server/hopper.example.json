@@ -7,12 +7,13 @@
   "tun": "hopper_a1b2c3d4",
   "listen_host": "127.0.0.1",
   "listen_port": 7405,
-  "next": {
+  "await_reverse": true,
+  "downstream": {
     "host": "hop2.example.com",
     "port": 22,
-    "user": "hopper",
+    "user": "root",
     "key_path": "~/.hopper/id_ed25519",
-    "tunnel_port": 7406
+    "tunnel_port": 7405
   },
   "nat": false
 }

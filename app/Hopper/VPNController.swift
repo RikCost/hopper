@@ -139,6 +139,11 @@ final class VPNController: ObservableObject {
         persist()
     }
 
+    func recordDeployKeyUse(id: UUID, server: HopNodeProfile) {
+        state.recordDeployKeyUse(id: id, server: server)
+        persist()
+    }
+
     func importDeployKey(_ key: DeploySSHKey) {
         _ = state.importDeployKey(key)
         persist()
@@ -237,18 +242,28 @@ final class VPNController: ObservableObject {
     func fetchChainStatus(chainID: UUID) async {
         guard let chain = state.chains.first(where: { $0.id == chainID }) else { return }
         let hops = state.resolveHops(chain)
-        var reports: [ChainStatusReport] = []
-        await withTaskGroup(of: ChainStatusReport?.self) { group in
-            for hop in hops {
-                group.addTask {
-                    try? await ChainStatusService.fetch(on: hop, chainID: chainID)
-                }
-            }
-            for await report in group {
-                if let report { reports.append(report) }
-            }
+        guard !hops.isEmpty else {
+            chainStatusReports[chainID] = []
+            return
         }
-        chainStatusReports[chainID] = reports
+        do {
+            let reports = try await ChainSSHForward.withChain(hops) { forward in
+                var reports: [ChainStatusReport] = []
+                for index in hops.indices {
+                    if let report = try? await ChainStatusService.fetch(
+                        on: forward.client(at: index),
+                        hop: hops[index],
+                        chainID: chainID
+                    ) {
+                        reports.append(report)
+                    }
+                }
+                return reports
+            }
+            chainStatusReports[chainID] = reports
+        } catch {
+            TunnelLog.error("Chain status through entry failed: \(HopErrorDetails.describe(error))")
+        }
     }
 
     // MARK: - VPN
@@ -301,8 +316,16 @@ final class VPNController: ObservableObject {
         errorMessage = nil
         provisionStatus = "Updating servers…"
         do {
-            for hop in prompt.hops {
-                try await VersionService.updateServer(on: hop, to: prompt.targetVersion)
+            let hops = state.activeHops
+            try await ChainSSHForward.withChain(hops) { forward in
+                for hop in prompt.hops {
+                    guard let index = hops.firstIndex(where: { $0.id == hop.id }) else { continue }
+                    try await VersionService.updateServer(
+                        on: forward.client(at: index),
+                        hop: hop,
+                        to: prompt.targetVersion
+                    )
+                }
             }
             guard let chain = state.selectedChain, let entry = state.entryHop else { return }
             try await performConnect(
@@ -328,14 +351,14 @@ final class VPNController: ObservableObject {
         hops: [HopNodeProfile],
         restartHopperd: Bool
     ) async throws {
-        provisionStatus = "Provisioning chain (exit → entry)…"
+        provisionStatus = "Connecting to \(entry.displayName)…"
         _ = try await ChainProvisioner.provision(
             chainID: chain.id,
             chain: hops,
             restartHopperd: restartHopperd
         ) { [weak self] index, total, message in
             Task { @MainActor in
-                self?.provisionStatus = "[\(total - index)/\(total)] \(message)"
+                self?.provisionStatus = "[\(index + 1)/\(total)] \(message)"
             }
         }
         provisionStatus = "Starting VPN…"
@@ -361,17 +384,16 @@ final class VPNController: ObservableObject {
     }
 
     private func preflightVersions(hops: [HopNodeProfile]) async throws -> PreflightResult {
-        var infos: [(hop: HopNodeProfile, info: ServerVersionInfo)] = []
-        try await withThrowingTaskGroup(of: (HopNodeProfile, ServerVersionInfo).self) { group in
-            for hop in hops {
-                group.addTask {
-                    let info = try await VersionService.fetchServerVersion(on: hop)
-                    return (hop, info)
-                }
+        let infos = try await ChainSSHForward.withChain(hops) { forward in
+            var infos: [(hop: HopNodeProfile, info: ServerVersionInfo)] = []
+            for index in hops.indices {
+                let info = try await VersionService.fetchServerVersion(
+                    on: forward.client(at: index),
+                    hop: hops[index]
+                )
+                infos.append((hops[index], info))
             }
-            for try await pair in group {
-                infos.append((hop: pair.0, info: pair.1))
-            }
+            return infos
         }
 
         for item in infos {

@@ -6,6 +6,7 @@ import (
 	"net"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/aengix/hopper/server/internal/iptunnel"
 	"github.com/aengix/hopper/server/internal/log"
@@ -18,6 +19,7 @@ type Server struct {
 	registry *SessionRegistry
 	leases   *LeaseManager
 	status   *StatusWriter
+	reverse  *ReversePool
 	tunOnce  sync.Once
 }
 
@@ -31,6 +33,7 @@ func NewServer(cfg Config) (*Server, error) {
 		registry: NewSessionRegistry(),
 		leases:   leases,
 		status:   NewStatusWriter(cfg),
+		reverse:  NewReversePool(),
 	}, nil
 }
 
@@ -46,7 +49,7 @@ func (s *Server) Prepare() error {
 	}
 	if err := iptunnel.ConfigureTUN(s.cfg.TUN, s.cfg.Addr, s.cfg.Overlay); err != nil {
 		_ = tun.Close()
-		return fmt.Errorf("configure tun: %w", s.cfg.TUN, err)
+		return fmt.Errorf("configure tun %s: %w", s.cfg.TUN, err)
 	}
 	s.tun = tun
 	s.startTUNReader()
@@ -109,6 +112,21 @@ func (s *Server) Listen() (net.Listener, int, error) {
 }
 
 func (s *Server) ServeConn(conn net.Conn) {
+	_ = conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	frame, err := iptunnel.ReadFrame(conn)
+	if err != nil {
+		log.Errorf("session peek from %s: %v", conn.RemoteAddr(), err)
+		_ = conn.Close()
+		return
+	}
+	_ = conn.SetReadDeadline(time.Time{})
+
+	if frame.Type == iptunnel.TypeReverseOffer {
+		// Pool owns the connection until claim or idle close.
+		s.handleReverseOffer(conn, frame)
+		return
+	}
+
 	s.sessions.Add(1)
 	defer func() {
 		s.sessions.Add(-1)
@@ -120,7 +138,9 @@ func (s *Server) ServeConn(conn net.Conn) {
 		log.Errorf("session setup from %s: %v", conn.RemoteAddr(), err)
 		return
 	}
-	_ = sess.Run()
+	if err := sess.RunWithFirstFrame(frame); err != nil {
+		log.Infof("session ended: %v", err)
+	}
 }
 
 func (s *Server) clientPoolContains(ip net.IP) bool {
@@ -132,6 +152,32 @@ func (s *Server) clientPoolContains(ip net.IP) bool {
 		return false
 	}
 	return pool.Contains(ip)
+}
+
+// ownsClientIP reports whether this hop should track the IP as a phone/client
+// overlay address. Entry uses client_pool; relays/exits use the whole overlay
+// so TUN replies can find the reverse session that carried the request.
+func (s *Server) ownsClientIP(ip net.IP) bool {
+	if s.clientPoolContains(ip) {
+		return true
+	}
+	if s.cfg.ClientPool != "" || s.cfg.Overlay == "" || ip == nil {
+		return false
+	}
+	_, overlay, err := net.ParseCIDR(s.cfg.Overlay)
+	if err != nil {
+		return false
+	}
+	if !overlay.Contains(ip) {
+		return false
+	}
+	// Do not bind the hop's own overlay address as a client.
+	if s.cfg.Addr != "" {
+		if hop := net.ParseIP(s.cfg.Addr); hop != nil && hop.Equal(ip) {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *Server) sessionForDest(dest net.IP) *Session {

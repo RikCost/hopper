@@ -3,9 +3,12 @@ package com.aengix.hopper.provision
 import com.aengix.hopper.model.ChainTopology
 import com.aengix.hopper.model.HopNodeProfile
 import com.aengix.hopper.model.HopReadyReport
+import com.aengix.hopper.ssh.ChainSSHForward
 import com.aengix.hopper.ssh.HopSSH
 import com.aengix.hopper.util.HopErrorDetails
+import com.aengix.hopper.util.ShellQuote
 import com.aengix.hopper.util.TunnelLog
+import net.schmizz.sshj.SSHClient
 
 sealed class ChainProvisionerException(message: String) : Exception(message) {
     data object EmptyChain : ChainProvisionerException("Add at least one hop (entry → exit order).")
@@ -17,6 +20,10 @@ sealed class ChainProvisionerException(message: String) : Exception(message) {
 }
 
 object ChainProvisioner {
+    /**
+     * Opens SSH only to the entry hop, then reaches each later hop through a direct-tcpip forward.
+     * Each hop is configured with upstream/downstream for reverse dialing. Forwards close when done.
+     */
     fun provision(
         chainId: String,
         chain: List<HopNodeProfile>,
@@ -26,86 +33,103 @@ object ChainProvisioner {
         if (chain.isEmpty()) throw ChainProvisionerException.EmptyChain
 
         val total = chain.size
-        val reports = mutableListOf<HopReadyReport>()
         val overlay = ChainTopology.overlayCIDR(chainId)
         val skipIfRunning = !restartHopperd
+        val listenPort = ChainTopology.listenPort(chainId)
 
-        if (restartHopperd) {
-            onProgress?.invoke(total - 1, total, "Stopping previous hopperd on all hops…")
-            chain.forEach { stopNode(it, chainId) }
-        }
-
-        var downstreamListenPort: Int? = null
-
-        for (i in (total - 1 downTo 0)) {
-            val hop = chain[i]
-            val label = hop.displayName
-            onProgress?.invoke(i, total, "Configuring $label…")
-            TunnelLog.info("Chain provision hop[$i] $label")
-
-            if (i < total - 1) {
-                val downstream = chain[i + 1]
-                val pubkey = fetchPubkey(hop)
-                trustPubkey(pubkey, downstream, chainId)
+        return ChainSSHForward.withChain(
+            hops = chain,
+            onHop = { index, hop ->
+                if (index == 0) {
+                    onProgress?.invoke(index, total, "Connecting to entry ${hop.displayName}…")
+                } else {
+                    val via = chain[index - 1].displayName
+                    onProgress?.invoke(index, total, "Forwarding through $via to ${hop.displayName}…")
+                }
+            },
+        ) { forward ->
+            if (restartHopperd) {
+                onProgress?.invoke(total - 1, total, "Stopping previous hopperd on all hops…")
+                for (index in chain.indices) {
+                    stopNode(forward.client(index), chain[index], chainId)
+                }
             }
 
-            val report = startNode(
-                chainId = chainId,
-                hop = hop,
-                index = i,
-                isExit = i == total - 1,
-                next = chain.getOrNull(i + 1),
-                nextTunnelPort = downstreamListenPort,
-                overlay = overlay,
-                skipIfRunning = skipIfRunning,
-            )
-            downstreamListenPort = report.listen_port ?: ChainTopology.listenPort(chainId)
-            reports += report
-            onProgress?.invoke(i, total, "$label ready (${report.mode} ${report.addr})")
-        }
+            val reports = mutableListOf<HopReadyReport>()
 
-        return reports.asReversed()
+            // Exit → entry so reverse dialers can retry until upstream is listening.
+            for (i in (total - 1 downTo 0)) {
+                val hop = chain[i]
+                val label = hop.displayName
+                onProgress?.invoke(i, total, "Configuring $label…")
+                TunnelLog.info("Chain provision hop[$i] $label")
+
+                // Trust both directions so either hop can dial (sticky dialer).
+                if (i < total - 1) {
+                    val downstream = chain[i + 1]
+                    val downPub = fetchPubkey(forward.client(i + 1), downstream)
+                    trustPubkey(downPub, forward.client(i), hop, chainId)
+                    val upPub = fetchPubkey(forward.client(i), hop)
+                    trustPubkey(upPub, forward.client(i + 1), downstream, chainId)
+                }
+
+                val report = startNode(
+                    client = forward.client(i),
+                    chainId = chainId,
+                    hop = hop,
+                    index = i,
+                    isExit = i == total - 1,
+                    upstream = chain.getOrNull(i - 1),
+                    downstream = chain.getOrNull(i + 1),
+                    tunnelPort = listenPort,
+                    overlay = overlay,
+                    skipIfRunning = skipIfRunning,
+                )
+                reports += report
+                onProgress?.invoke(i, total, "$label ready (${report.mode} ${report.addr})")
+            }
+
+            reports.asReversed()
+        }
     }
 
-    private fun stopNode(hop: HopNodeProfile, chainId: String) {
+    private fun stopNode(client: SSHClient, hop: HopNodeProfile, chainId: String) {
         val install = hop.resolvedInstallDir
-        val cmd = "cd ${shellQuote(install)} && ./hopperctl start --chain-id ${shellQuote(chainId)} --stop-only"
+        val cmd = "cd ${ShellQuote.bashRemotePath(install)} && ./hopperctl start --chain-id ${shellQuote(chainId)} --stop-only"
         runCatching {
-            HopSSH.withSession(hop) { client ->
-                HopSSH.runCommand(client, cmd)
-            }
+            HopSSH.runCommand(client, cmd)
             TunnelLog.info("Stopped previous hopperd on ${hop.displayName}")
         }.onFailure {
             TunnelLog.info("Stop hopperd on ${hop.displayName} (non-fatal): ${HopErrorDetails.describe(it)}")
         }
     }
 
-    private fun fetchPubkey(hop: HopNodeProfile): String {
-        return HopSSH.withSession(hop) { client ->
-            val output = HopSSH.runCommand(client, "cat ~/.hopper/id_ed25519.pub").trim()
-            if (!output.startsWith("ssh-")) {
-                throw ChainProvisionerException.MissingPubkey(hop.displayName)
-            }
-            output
+    private fun fetchPubkey(client: SSHClient, hop: HopNodeProfile): String {
+        val output = HopSSH.runCommand(client, "cat ~/.hopper/id_ed25519.pub").trim()
+        if (!output.startsWith("ssh-")) {
+            throw ChainProvisionerException.MissingPubkey(hop.displayName)
         }
+        return output
     }
 
-    private fun trustPubkey(pubkey: String, hop: HopNodeProfile, chainId: String) {
+    private fun trustPubkey(pubkey: String, client: SSHClient, hop: HopNodeProfile, chainId: String) {
         val install = hop.resolvedInstallDir
-        val cmd = "cd ${shellQuote(install)} && ./hopperctl start --chain-id ${shellQuote(chainId)} --trust-pubkey ${shellQuote(pubkey)} --trust-only"
-        HopSSH.withSession(hop) { client ->
-            HopSSH.runCommand(client, cmd)
-        }
-        TunnelLog.info("Trusted upstream key on ${hop.displayName}")
+        val cmd =
+            "cd ${ShellQuote.bashRemotePath(install)} && ./hopperctl start --chain-id ${shellQuote(chainId)} " +
+                "--trust-pubkey ${shellQuote(pubkey)} --trust-only"
+        HopSSH.runCommand(client, cmd)
+        TunnelLog.info("Trusted reverse-dial key on ${hop.displayName}")
     }
 
     private fun startNode(
+        client: SSHClient,
         chainId: String,
         hop: HopNodeProfile,
         index: Int,
         isExit: Boolean,
-        next: HopNodeProfile?,
-        nextTunnelPort: Int?,
+        upstream: HopNodeProfile?,
+        downstream: HopNodeProfile?,
+        tunnelPort: Int,
         overlay: String,
         skipIfRunning: Boolean,
     ): HopReadyReport {
@@ -120,23 +144,25 @@ object ChainProvisioner {
             if (skipIfRunning) {
                 add("--if-running"); add("skip")
             }
-            if (next != null) {
-                add("--next-host"); add(next.trimmedHost)
-                add("--next-port"); add(next.port.toString())
-                add("--next-user"); add(next.trimmedUser)
-                if (nextTunnelPort != null) {
-                    add("--next-tunnel-port"); add(nextTunnelPort.toString())
-                }
+            if (upstream != null) {
+                add("--upstream-host"); add(upstream.trimmedHost)
+                add("--upstream-port"); add(upstream.port.toString())
+                add("--upstream-user"); add(upstream.trimmedUser.ifEmpty { "root" })
+                add("--upstream-tunnel-port"); add(tunnelPort.toString())
+            }
+            if (downstream != null) {
+                add("--downstream-host"); add(downstream.trimmedHost)
+                add("--downstream-port"); add(downstream.port.toString())
+                add("--downstream-user"); add(downstream.trimmedUser.ifEmpty { "root" })
+                add("--downstream-tunnel-port"); add(tunnelPort.toString())
             }
         }
 
         val argString = args.joinToString(" ") { shellQuote(it) }
-        val cmd = "cd ${shellQuote(install)} && ./hopperctl start $argString"
+        val cmd = "cd ${ShellQuote.bashRemotePath(install)} && ./hopperctl start $argString"
 
-        return HopSSH.withSession(hop) { client ->
-            val output = HopSSH.runCommand(client, cmd)
-            HopReadyReport.parse(output)
-        }
+        val output = HopSSH.runCommand(client, cmd)
+        return HopReadyReport.parse(output)
     }
 
     private fun shellQuote(value: String): String =

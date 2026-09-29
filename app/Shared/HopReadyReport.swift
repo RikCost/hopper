@@ -1,3 +1,4 @@
+import Citadel
 import Foundation
 
 struct HopReadyReport: Codable, Equatable {
@@ -88,12 +89,10 @@ struct ChainSessionStatus: Codable, Equatable, Identifiable {
 }
 
 enum ChainStatusService {
-    static func fetch(on hop: HopNodeProfile, chainID: UUID) async throws -> ChainStatusReport {
+    static func fetch(on client: SSHClient, hop: HopNodeProfile, chainID: UUID) async throws -> ChainStatusReport {
         let install = hop.resolvedInstallDir
-        let cmd = "cd \(shellQuote(install)) && ./hopperctl status --chain-id \(shellQuote(chainID.uuidString))"
-        let output = try await HopSSH.withSession(on: hop) { client in
-            try await HopSSH.runCommand(on: client, cmd)
-        }
+        let cmd = "cd \(ShellQuote.bashRemotePath(install)) && ./hopperctl status --chain-id \(shellQuote(chainID.uuidString))"
+        let output = try await HopSSH.runCommand(on: client, cmd)
         guard let data = output.data(using: .utf8) else {
             throw ChainStatusServiceError.invalidResponse
         }

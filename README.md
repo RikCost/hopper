@@ -4,7 +4,8 @@
   <img src="screenshots/app-icon.png" width="128" alt="ɹǝddoH app icon">
 </p>
 
-iOS and Android VPN clients plus a Linux server stack for a **multi-hop SSH overlay**: traffic is tunneled as raw IP packets over SSH, routed through a chain of nodes, and NAT’d at the exit. One app, one server daemon (`hopperd`), no legacy relays.
+iOS and Android VPN clients plus a Linux server stack for an **SSH overlay VPN**: traffic is tunneled as raw IP packets over SSH, routed through one or more hops, and NAT’d at the exit. Supports **one-hop** (single VPS) and **multi-hop chains**, including **reverse inter-hop links** when only one direction of SSH between hops works. One app, one server daemon (`hopperd`).
+
 
 ## Getting the app
 
@@ -45,7 +46,8 @@ The app uploads `hopperd`, runs `configure_server.sh`, and saves the server prof
 
 **Alternative (developers):** deploy from your Mac with `./deploy.sh` — see [Deploy from the command line](#deploy-from-the-command-line).
 
-You can also add servers via **Scan QR**, **Import from file**, **Import from copy&paste**, or **Import remotely** if you used the CLI deploy flow. The same import path accepts a shared **key** payload into Keys library.
+You can also add an already-installed server with **Add manually** (same host/user/port auth as Deploy, without installing Hopper), or via **Scan QR**, **Import from file**, **Import from copy&paste**, or **Import remotely**. The same import path accepts a shared **key** payload into Keys library.
+
 
 ## Screenshots
 
@@ -86,44 +88,104 @@ flowchart LR
   subgraph clients [Mobile clients]
     App[iOS / Android app]
     Tunnel[Packet tunnel]
-    App -->|provision chain| Tunnel
+    App -->|verify + provision| Tunnel
     Tunnel -->|SSH + iptunnel| Entry
   end
 
-  subgraph chain [Server chain entry to exit]
-    Entry[hopperd entry]
-    Relay[hopperd relay]
-    Exit[hopperd exit]
-    Entry -->|SSH pipe| Relay
-    Relay -->|SSH pipe| Exit
-  end
-
+  Entry[hopperd entry]
+  Exit[hopperd exit]
   Tunnel --> Entry
+  Entry -.->|reverse or forward hop link| Exit
   Exit -->|TUN + NAT| Internet[(Internet)]
 ```
 
-| Layer           | Role                                                                                             |
-| --------------- | ------------------------------------------------------------------------------------------------ |
-| **iOS**         | L3 VPN (`NEPacketTunnelProvider`). All IPv4 default traffic → leased overlay client address.     |
-| **Android**     | L3 VPN (`VpnService`). Same overlay address and iptunnel data plane as iOS.                      |
-| **iptunnel** | Framed IP over a byte stream (SSH `direct-tcpip` to `127.0.0.1:7400`).                           |
-| **hopperd**  | Userspace routing between ingress (client), `next` (downstream hop), and TUN (internet on exit). |
-| **SSH**      | App → entry hop; each hop → next hop via local `~/.hopper/id_ed25519`.                           |
-
-### Two-phase connect
-
-1. **Provision (exit → entry)** — The app SSH-execs `start_server.sh` on each hop, last to first: trust upstream keys, write `hopper.json`, start `hopperd`.
-2. **VPN (entry only)** — Extension SSH-connects to the **first** hop in the chain, opens iptunnel to local `hopperd`, and carries packets.
+| Layer | Role |
+| ----- | ---- |
+| **iOS** | L3 VPN (`NEPacketTunnelProvider`). Default IPv4 → leased overlay client address. |
+| **Android** | L3 VPN (`VpnService`). Same overlay + iptunnel data plane as iOS. |
+| **iptunnel** | Framed IP over a byte stream (SSH `direct-tcpip` to `127.0.0.1:<listen_port>`). |
+| **hopperd** | Userspace routing between ingress (phone), reverse/downstream hop link, and TUN (internet on exit). |
+| **SSH** | Phone → **entry only**. Inter-hop links use each hop’s `~/.hopper/id_ed25519` (forward or reverse). |
 
 Chain order in the app: **first = entry**, **last = exit**.
+
+### One-hop
+
+A chain with a **single server** is valid: that host is both entry and exit.
+
+```mermaid
+flowchart LR
+  Phone[Phone VPN] -->|SSH + iptunnel| Hop[hopperd entry+exit]
+  Hop -->|TUN + NAT| Net[(Internet)]
+```
+
+- Phone opens one SSH session to that host and ports to local `hopperd`.
+- `hopperd` assigns a client address from the chain pool, routes `0.0.0.0/0` to TUN, and applies NAT.
+- No inter-hop SSH, no reverse dialer.
+
+### Multi-hop and reverse links
+
+With two or more hops, the phone still SSH-connects **only to the entry**. Traffic between hops is carried on an iptunnel session over SSH between `hopperd` processes.
+
+**Who dials whom** is separate from logical order (entry → exit):
+
+| Situation | Behavior |
+| --------- | -------- |
+| Entry can reach exit’s SSH | Entry (or previous hop) dials next with `provide=ingress`; next runs the hop session on that channel. Entry keeps a **spare** reverse link parked for the next phone session. |
+| Only exit can reach entry (inbound blocked on exit) | Exit dials upstream with `provide=downstream`; entry **parks** the offer until a phone session claims it. |
+| Sticky preference | After a successful dial, `~/.hopper/link-sticky/<peer>.json` records `outbound_to` / `inbound_from` so an **opposite** app chain (same two hosts, swapped order) reuses that dial direction instead of flipping. |
+
+```mermaid
+flowchart TB
+  subgraph a_to_b [Logical A then B — sticky A dials B]
+    Phone1[Phone] -->|SSH| A1[A entry]
+    A1 -->|reverse dial provide=ingress| B1[B exit]
+    B1 --> Net1[(Internet)]
+  end
+
+  subgraph b_to_a [Logical B then A — same sticky]
+    Phone2[Phone] -->|SSH| B2[B entry]
+    A2[A exit] -->|reverse dial provide=downstream| B2
+    A2 --> Net2[(Internet)]
+  end
+```
+
+Keepalives hold parked reverse links until claimed. When a phone session takes a spare, the dialer **refills** so the next connect does not wait on a cold dial.
+
+### Connect sequence (verification chain)
+
+On **Connect**, the app runs checks and setup **before** the VPN data plane. Failures stop early with a clear status.
+
+1. **Version check (every hop)** — SSH to each hop (nested: phone → entry, then `direct-tcpip` jump to later hops). Read `hopperctl configure --version-json`. Compare `server_version` / `min_app_version` / `min_server_version` with the app. Prompt to update servers when required.
+2. **Optional server update** — If the user confirms, `hopperctl update` on hops that are behind.
+3. **Provision (exit → entry)** — Still over the nested SSH forward (phone only needs reachability to the entry):
+   - Mutual **trust**: each hop’s `~/.hopper/id_ed25519.pub` is authorized on its peer (`--trust-pubkey`).
+   - Write `~/.hopper/chains/<chain_id>/hopper.json` with role, overlay addr, `upstream` / `downstream` as needed, then start `hopperd`.
+   - Exit first so reverse dialers can attach as soon as the peer listens.
+4. **VPN start (entry only)** — Packet tunnel SSH to the entry, open iptunnel to `127.0.0.1:<listen_port>`, assign client IP, send traffic.
+
+```mermaid
+sequenceDiagram
+  participant App
+  participant Entry
+  participant Exit
+  App->>Entry: SSH (version / provision jump)
+  Entry->>Exit: SSH jump (version / provision)
+  App->>Exit: trust + hopperctl start (via jump)
+  App->>Entry: trust + hopperctl start
+  Note over Entry,Exit: reverse dial + sticky
+  App->>Entry: VPN SSH + iptunnel
+  Entry-->>Exit: hop link (reverse or forward)
+  Exit-->>App: internet via TUN/NAT
+```
 
 ### Multi-chain and multi-device
 
 Hopper supports **multiple chains** and **multiple clients per chain** on the same servers.
 
-**Multi-chain** — Each chain has its own UUID. That ID derives a dedicated overlay subnet (`10.64.{octet}.0/24`), local `hopperd` listen port (`7400 + octet`), and TUN interface (`hopper_*`) on every hop. State lives under `~/.hopper/chains/{chain_id}/`; active chains are tracked in `~/.hopper/registry.json`. The same VPS can serve several chains at once (as entry, relay, or exit in different chains).
+**Multi-chain** — Each chain has its own UUID. That ID derives a dedicated overlay subnet (`10.64.{octet}.0/24`), local `hopperd` listen port (`7400 + octet`), and TUN interface (`hopper_*`) on every hop. State lives under `~/.hopper/chains/{chain_id}/`; active chains are tracked in `~/.hopper/registry.json`. The same VPS can serve several chains at once (as entry, relay, or exit in different chains). Sticky dial files are **per peer host**, shared across chains on that machine.
 
-**Multi-device** — Several phones or tablets can connect to the **same chain** at the same time. Each app install gets a stable device ID; the entry hop assigns a unique client address from that chain's pool (`10.64.{octet}.2`–`.254`) via lease. Leases renew while connected and expire after idle timeout (default 1 hour).
+**Multi-device** — Several phones or tablets can connect to the **same chain** at the same time. Each app install gets a stable device ID; the entry hop assigns a unique client address from that chain's pool (`10.64.{octet}.2`–`.254`) via lease. Leases renew while connected and expire after idle timeout (default 1 hour). Entry keeps reverse **spares** so a second device does not wait for a cold dial.
 
 **TUN limits** — Each active chain uses **one TUN interface per hop** where `hopperd` runs. How many chains you can run in parallel on a server depends on how many TUN devices the host allows (typically many on a stock Linux VPS, but the limit varies by kernel and provider).
 
@@ -135,7 +197,7 @@ Each chain gets its own `/24` subnet: `10.64.{octet}.0/24`, where `{octet}` is d
 | ------- | --- |
 | `10.64.{octet}.2`–`.254` | Mobile clients (leased per device) |
 | `10.64.{octet}.10` + index | Hop *i* in chain (entry = `.10`) |
-| `0.0.0.0/0` | Relay → `next`; exit → TUN + NAT |
+| `0.0.0.0/0` | Relay/entry with next → hop link; exit → TUN + NAT |
 
 ---
 
@@ -170,8 +232,8 @@ Each chain gets its own `/24` subnet: `10.64.{octet}.0/24`, where `{octet}` is d
 ## Quick start
 
 1. [Get the app](#getting-the-app) and [set up one or more servers](#setting-up-a-server).
-2. **New chain** → name it → **Add server…** in order **entry → exit** (pick servers from the library).
-3. Swipe **Use** (iOS) or tap **Use** (Android), or pick the chain on the home screen → **Connect**.
+2. **New chain** → name it → **Add server…** in order **entry → exit** (one server = one-hop; two or more = multi-hop).
+3. Swipe **Use** (iOS) or tap **Use** (Android), or pick the chain on the home screen → **Connect** (version check → provision → VPN).
 
 ### Remove a hop
 
@@ -217,9 +279,9 @@ Environment: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_KEY`, `DEPLOY_
 
 ```
 ~/hopper/
-  configure_server.sh   # one-time / re-run: keys + JSON profile
-  start_server.sh       # app-invoked: config + start hopperd
-  hopper_common.sh
+  hopperctl             # CLI: start / configure / update / remove
+  install.sh
+  VERSION.json
   dist/
     hopperd-linux-amd64
     hopperd-linux-arm64
@@ -227,6 +289,7 @@ Environment: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_KEY`, `DEPLOY_
 ~/.hopper/
   id_ed25519            # inter-hop + hopperd SSH identity
   registry.json         # active chains
+  link-sticky/          # preferred dial direction per peer host
   chains/{chain_id}/
     hopper.json         # runtime config for this chain
     hopper-ready        # READY port line while running
@@ -237,31 +300,31 @@ Environment: `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PORT`, `DEPLOY_KEY`, `DEPLOY_
 
 | Script                | Who runs it         | Purpose                                                                          |
 | --------------------- | ------------------- | -------------------------------------------------------------------------------- |
-| `configure_server.sh` | Admin / `deploy.sh` | Generate host keypair, `authorized_keys`, optional `setcap`, emit QR JSON        |
-| `start_server.sh`     | Mobile app via SSH exec | `--stop-only`, `--trust-pubkey`, write config, start `hopperd`, print ready JSON |
-| `deploy.sh`           | Developer           | Build, upload, configure, browser QR                                             |
+| `hopperctl` / `install.sh` | Admin / `deploy.sh` / app | Install bundle, configure profile, start/stop/update `hopperd` per chain |
+| `deploy.sh`           | Developer           | Build, upload local tree + binaries, configure                                   |
 | `remove.sh`           | Developer           | Uninstall                                                                        |
 | `build_dist.sh`       | Developer           | Cross-compile `hopperd`                                                          |
 
-#### `configure_server.sh`
+#### Provision via `hopperctl start`
+
+The app (and CLI) drives hops with `hopperctl start` over SSH. Typical flags:
 
 ```bash
-./configure_server.sh                    # interactive on server
-./configure_server.sh --json-only --host 1.2.3.4 --port 22
+# Exit hop (index > 0): must declare upstream toward previous hop
+./hopperctl start --chain-id <uuid> --role exit --addr 10.64.N.11 --index 1 \
+  --upstream-host entry.example.com --upstream-port 22 --upstream-user root \
+  --upstream-tunnel-port 75xx
+
+# Entry / relay: downstream toward next hop (reverse dial when sticky says so)
+./hopperctl start --chain-id <uuid> --role relay --addr 10.64.N.10 --index 0 \
+  --downstream-host exit.example.com --downstream-port 22 --downstream-user root \
+  --downstream-tunnel-port 75xx
+
+./hopperctl start --chain-id <uuid> --trust-pubkey 'ssh-ed25519 AAAA…' --trust-only
+./hopperctl start --chain-id <uuid> --stop-only
 ```
 
-#### `start_server.sh` (provision)
-
-```bash
-./start_server.sh --role exit --addr 10.64.0.12 --index 2 \
-  --overlay 10.64.0.0/24 --client-addr 10.64.0.2
-
-./start_server.sh --role relay --addr 10.64.0.11 --index 1 \
-  --client-addr 10.64.0.2 \
-  --next-host hop2.example.com --next-port 22 --next-user root
-```
-
-Stdout: one JSON line, e.g. `{"ready":true,"mode":"exit","addr":"10.64.0.12",...}`.
+Stdout: one JSON line, e.g. `{"ready":true,"mode":"exit","addr":"10.64.N.11",…}`.
 
 ### `hopperd`
 
@@ -309,7 +372,7 @@ Binaries land in `server/dist/` (gitignored).
 | **Home**             | Select chain, connect/disconnect, route preview, import/export |
 | **Configure chains** | Create/delete chains, open server library and keys library |
 | **Chain detail**     | Name, reorder hops, add/remove servers          |
-| **Server library**   | **Deploy** new servers, scan QR, import `.hopperconf` / JSON, delete servers |
+| **Server library**   | **Deploy**, **Add manually**, scan QR, import `.hopperconf` / JSON, delete servers |
 | **Keys library**     | List deploy keys and assigned `user@host`, generate ED25519, paste/validate PEM, scan QR, import/export `.hopperconf` |
 | **Export**           | **Export as file…** and **Show QR code…** on one row (home, chain, server, key) |
 
@@ -472,7 +535,7 @@ app-android/
   generate-keystore.sh Create hopper-upload signing key
 server/
   cmd/hopperd/         Daemon entrypoint
-  internal/hopper/     Config, session routing, NAT, SSH next-hop
+  internal/hopper/     Config, session routing, reverse dial + sticky, NAT, SSH hop link
   internal/iptunnel/   Frame protocol + Linux TUN
 ```
 
@@ -480,7 +543,7 @@ server/
 
 ## Android app reference
 
-Same screens and flow as iOS: home (chain + connect), chain configurator, chain detail, server library (**Deploy**, QR scan, import from file / paste / remotely), **Keys library** (generate / paste PEM / QR / import / export deploy keys), encrypted file share for servers, chains, and keys.
+Same screens and flow as iOS: home (chain + connect), chain configurator, chain detail, server library (**Deploy**, **Add manually**, QR scan, import from file / paste / remotely), **Keys library** (generate / paste PEM / QR / import / export deploy keys), encrypted file share for servers, chains, and keys.
 
 Profiles persist in app-private storage (`hopper-profiles.json`). Server profile JSON and `.hopperconf` formats are identical to iOS — see [Server profile JSON (v2)](#server-profile-json-v2), [Keys library](#keys-library), and [`.hopperconf` share files (v1)](#hopperconf-share-files-v1).
 
@@ -588,7 +651,8 @@ app-android/
 | Symptom                   | Things to check                                                                  |
 | ------------------------- | -------------------------------------------------------------------------------- |
 | VPN connects, no internet | Exit NAT: `iptables -t nat -L`; today’s `hopper-YYYY-MM-DD.log` on exit; re-connect to re-provision |
-| Chain provision fails     | SSH from app to each hop; `start_server.sh` on server; keys in `authorized_keys` |
+| Chain provision fails     | Nested SSH to later hops via entry; `hopperctl` on server; keys in `authorized_keys` |
+| Reverse wait / stream closed | Entry log: `reverse linked` / `reverse spare claimed`; sticky under `~/.hopper/link-sticky/`; peer reachable on SSH; matching `chain_id` + `listen_port` |
 | `hopperd` won’t start     | Root/`setcap cap_net_admin`; read `~/.hopper/chains/<chain_id>/hopper-YYYY-MM-DD.log` |
 | Extension / VPN errors  | iOS: App Group + embedded extension; reinstall VPN profile. Android: revoke/re-grant VPN permission; check logcat `Hopper` |
 
@@ -601,7 +665,7 @@ app-android/
 **Manual stop on server**
 
 ```bash
-cd ~/hopper && ./start_server.sh --stop-only
+cd ~/hopper && ./hopperctl start --chain-id <uuid> --stop-only
 ```
 
 ---
@@ -609,7 +673,8 @@ cd ~/hopper && ./start_server.sh --stop-only
 ## Security notes
 
 - QR, deploy HTML, and `.hopperconf` files contain **private keys** — treat as secrets; deploy deletes local HTML after 5s.
-- Keys library holds **deploy** identities (SSH install). Each hop still has its own `~/.hopper/id_ed25519` for the tunnel; provision adds upstream pubkeys to downstream `authorized_keys`.
+- Keys library holds **deploy** identities (SSH install). Each hop still has its own `~/.hopper/id_ed25519` for tunnels; provision adds peer pubkeys to `authorized_keys` (both directions for reverse dial).
+- Inter-hop sticky dial state is under `~/.hopper/link-sticky/` (host-scoped, not a secret key).
 - `hopperd` binds to loopback; only SSH-forwarded clients reach iptunnel.
 - Review `authorized_keys` after `remove.sh` if you added keys manually.
 

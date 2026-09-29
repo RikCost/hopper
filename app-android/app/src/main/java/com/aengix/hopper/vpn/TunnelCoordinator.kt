@@ -47,6 +47,7 @@ class TunnelCoordinator(
             protectSocket(socket)
         }
 
+        TunnelLog.info("Requesting overlay IP assignment")
         val clientIP = IPTunnelAssignClient.performAssign(
             stream = sshSession!!.chainStream,
             deviceId = context.deviceId,
@@ -148,7 +149,8 @@ class TunnelCoordinator(
         }
         val protected = vpnService.protect(socket)
         if (!protected) {
-            TunnelLog.error("VPN protect() failed for entry SSH socket")
+            // Expected before Builder.establish(); traffic still uses the physical network.
+            TunnelLog.info("VPN protect() returned false before tunnel establish (ok)")
         }
         return protected
     }

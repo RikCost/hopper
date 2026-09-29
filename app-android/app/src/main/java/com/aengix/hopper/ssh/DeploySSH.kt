@@ -18,7 +18,55 @@ object DeploySSH {
         onLog: ((String) -> Unit)? = null,
     ): String {
         val log = onLog ?: {}
-        log("Connecting to $user@$host:$port…")
+        val sshClient = connectAndAuthorize(
+            host = host,
+            port = port,
+            user = user,
+            password = password,
+            privateKeyPem = privateKeyPem,
+            publicKeyLine = publicKeyLine,
+            onLog = log,
+        )
+        try {
+            log("Running remote install…")
+            return HopSSH.runCommand(sshClient, installCommand(host, port, installDir), onLine = log)
+        } finally {
+            runCatching { sshClient.disconnect() }
+        }
+    }
+
+    /** Connects (password or key) and ensures the public key is in authorized_keys. */
+    fun authorizeKey(
+        host: String,
+        port: Int,
+        user: String,
+        password: String?,
+        privateKeyPem: String,
+        publicKeyLine: String,
+        onLog: ((String) -> Unit)? = null,
+    ) {
+        val sshClient = connectAndAuthorize(
+            host = host,
+            port = port,
+            user = user,
+            password = password,
+            privateKeyPem = privateKeyPem,
+            publicKeyLine = publicKeyLine,
+            onLog = onLog ?: {},
+        )
+        runCatching { sshClient.disconnect() }
+    }
+
+    private fun connectAndAuthorize(
+        host: String,
+        port: Int,
+        user: String,
+        password: String?,
+        privateKeyPem: String,
+        publicKeyLine: String,
+        onLog: (String) -> Unit,
+    ): SSHClient {
+        onLog("Connecting to $user@$host:$port…")
 
         HopSecurityProviders.ensureRegistered()
         val resolvedHost = IPv4Only.resolveHost(host)
@@ -34,14 +82,13 @@ object DeploySSH {
                 sshClient.authPublickey(user, keyProvider)
             }
 
-            log("Ensuring deploy key is in authorized_keys…")
+            onLog("Ensuring deploy key is in authorized_keys…")
             HopSSH.runCommand(sshClient, authorizedKeysCommand(publicKeyLine, host))
-            log("Deploy key authorized.")
-
-            log("Running remote install…")
-            return HopSSH.runCommand(sshClient, installCommand(host, port, installDir), onLine = log)
-        } finally {
+            onLog("Deploy key authorized.")
+            return sshClient
+        } catch (error: Throwable) {
             runCatching { sshClient.disconnect() }
+            throw error
         }
     }
 

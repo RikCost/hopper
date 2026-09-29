@@ -2,8 +2,10 @@ package hopper
 
 import (
 	"encoding/json"
+	"fmt"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/aengix/hopper/server/internal/iptunnel"
 	"github.com/aengix/hopper/server/internal/log"
@@ -27,25 +29,19 @@ func NewSession(srv *Server, ingress net.Conn) (*Session, error) {
 		return nil, err
 	}
 
-	s := &Session{
+	return &Session{
 		srv:     srv,
 		cfg:     srv.cfg,
 		routes:  routes,
 		ingress: &frameConn{Conn: ingress},
-	}
-
-	if srv.cfg.HasNext() {
-		down, err := dialNextHop(*srv.cfg.Next)
-		if err != nil {
-			return nil, err
-		}
-		s.downstream = &frameConn{Conn: down}
-	}
-
-	return s, nil
+	}, nil
 }
 
 func (s *Session) Run() error {
+	return s.RunWithFirstFrame(iptunnel.Frame{})
+}
+
+func (s *Session) RunWithFirstFrame(first iptunnel.Frame) error {
 	log.Infof("session start mode=%s remote=%s", s.cfg.Mode(), s.ingress.RemoteAddr())
 
 	s.info = s.srv.status.Register(s, s.ingress.RemoteAddr().String())
@@ -54,21 +50,40 @@ func (s *Session) Run() error {
 		if s.clientIP != nil {
 			s.srv.registry.Unregister(s.clientIP)
 		}
+		if s.downstream != nil {
+			_ = s.downstream.Close()
+		}
 	}()
 
+	// Assign before waiting on the reverse link so a missing next hop cannot
+	// block the phone on the hopper stream / assign handshake.
 	if s.srv.leases != nil {
-		if err := s.handleAssign(); err != nil {
+		if err := s.handleAssign(first); err != nil {
 			log.Infof("assign failed: %v", err)
 			return err
 		}
+		first = iptunnel.Frame{}
 	}
 
 	stop := make(chan struct{})
-	defer close(stop)
 	s.srv.status.StartPeriodicFlush(stop)
 
+	// Keep the ingress alive with pings while waiting for the next hop's reverse dial.
+	go keepaliveLoop(s.ingress, stop)
+
+	if s.cfg.AwaitReverse && s.downstream == nil {
+		down, err := s.waitReverseWithIngressDrain(stop)
+		if err != nil {
+			close(stop)
+			log.Errorf("reverse wait failed: %v", err)
+			return fmt.Errorf("reverse wait: %w", err)
+		}
+		s.downstream = down
+	}
+	_ = s.ingress.SetReadDeadline(time.Time{})
+
 	var wg sync.WaitGroup
-	errCh := make(chan error, 2)
+	errCh := make(chan error, 3)
 
 	startPump := func(name string, conn *frameConn, from string) {
 		if conn == nil {
@@ -86,9 +101,20 @@ func (s *Session) Run() error {
 		}()
 	}
 
-	go keepaliveLoop(s.ingress, stop)
 	if s.downstream != nil {
 		go keepaliveLoop(s.downstream, stop)
+	}
+
+	if first.Type == iptunnel.TypeData && len(first.Payload) > 0 {
+		if err := s.routePacket(first.Payload, ViaIngress); err != nil {
+			close(stop)
+			return err
+		}
+	} else if first.Type == iptunnel.TypeKeepalive {
+		// already consumed
+	} else if first.Type != 0 {
+		close(stop)
+		return fmt.Errorf("unexpected first frame type %d", first.Type)
 	}
 
 	startPump("ingress", s.ingress, ViaIngress)
@@ -105,10 +131,55 @@ func (s *Session) Run() error {
 	return err
 }
 
-func (s *Session) handleAssign() error {
-	frame, err := iptunnel.ReadFrame(s.ingress)
-	if err != nil {
-		return err
+// waitReverseWithIngressDrain waits for the next hop to reverse-dial while
+// discarding ingress keepalives so the TCP window does not stall.
+func (s *Session) waitReverseWithIngressDrain(stop <-chan struct{}) (*frameConn, error) {
+	type result struct {
+		conn *frameConn
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		conn, err := s.srv.reverse.Take(reverseWaitTimeout)
+		ch <- result{conn, err}
+	}()
+
+	for {
+		select {
+		case <-stop:
+			return nil, fmt.Errorf("session stopped")
+		case out := <-ch:
+			return out.conn, out.err
+		default:
+		}
+
+		_ = s.ingress.SetReadDeadline(time.Now().Add(200 * time.Millisecond))
+		frame, err := iptunnel.ReadFrame(s.ingress)
+		if err != nil {
+			if ne, ok := err.(net.Error); ok && ne.Timeout() {
+				continue
+			}
+			return nil, err
+		}
+		if frame.Type == iptunnel.TypeKeepalive {
+			continue
+		}
+		if frame.Type == iptunnel.TypeData {
+			// Unexpected data before reverse is up — drop until link is ready.
+			continue
+		}
+		return nil, fmt.Errorf("unexpected frame type %d while waiting for reverse", frame.Type)
+	}
+}
+
+func (s *Session) handleAssign(first iptunnel.Frame) error {
+	frame := first
+	var err error
+	if frame.Type == 0 {
+		frame, err = iptunnel.ReadFrame(s.ingress)
+		if err != nil {
+			return err
+		}
 	}
 	if frame.Type != iptunnel.TypeAssignReq {
 		return iptunnel.ErrBadType
@@ -153,7 +224,7 @@ func (s *Session) bindFromPacket(packet []byte) {
 	if err != nil || src == nil {
 		return
 	}
-	if !s.srv.clientPoolContains(src) {
+	if !s.srv.ownsClientIP(src) {
 		return
 	}
 	s.mu.Lock()
@@ -172,7 +243,9 @@ func (s *Session) routePacket(packet []byte, from string) error {
 		s.bindFromPacket(packet)
 	}
 	if s.clientIP != nil {
-		s.srv.leases.Touch(s.clientIP.String())
+		if s.srv.leases != nil {
+			s.srv.leases.Touch(s.clientIP.String())
+		}
 		s.srv.status.Touch(s)
 	}
 
@@ -182,7 +255,7 @@ func (s *Session) routePacket(packet []byte, from string) error {
 		return nil
 	}
 
-	if from == ViaNext && s.srv.clientPoolContains(dest) {
+	if from == ViaNext && s.srv.ownsClientIP(dest) {
 		target := s.srv.sessionForDest(dest)
 		if target != nil {
 			return writeData(target.ingress, packet)

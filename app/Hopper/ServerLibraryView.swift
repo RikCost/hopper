@@ -8,6 +8,7 @@ struct ServerLibraryView: View {
     @State private var showScanner = false
     @State private var importMode: HopperImportMode?
     @State private var showDeploy = false
+    @State private var showAddManual = false
 
     private var isPickMode: Bool { chainID != nil }
 
@@ -21,7 +22,7 @@ struct ServerLibraryView: View {
     var body: some View {
         List {
             Section {
-                HopperImportButtons { importMode = $0 }
+                HopperImportButtons(onAddManually: { showAddManual = true }) { importMode = $0 }
             }
             if displayedServers.isEmpty {
                 ContentUnavailableView(
@@ -77,6 +78,9 @@ struct ServerLibraryView: View {
         .sheet(isPresented: $showDeploy) {
             DeployServerView()
         }
+        .sheet(isPresented: $showAddManual) {
+            AddServerView()
+        }
         .sheet(item: $importMode) { mode in
             HopperImportSheet(mode: mode) { importMode = nil }
         }
@@ -84,9 +88,9 @@ struct ServerLibraryView: View {
 
     private var emptyDescription: String {
         if isPickMode {
-            return "Deploy a server, scan a QR code, or import a .hopperconf file, then tap to add to this chain."
+            return "Add a server manually, deploy one, scan a QR code, or import a .hopperconf file, then tap to add to this chain."
         }
-        return "Deploy a server, scan a QR code, or import a .hopperconf file."
+        return "Add a server manually, deploy one, scan a QR code, or import a .hopperconf file."
     }
 
     @ViewBuilder

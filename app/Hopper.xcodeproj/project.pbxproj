@@ -33,6 +33,7 @@
 		A03E48238429801DC59B2AEC /* QRCodeScannerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94522CBE338B3FB5B345A67D /* QRCodeScannerView.swift */; };
 		A5B6C7D8E9F0A1B2C3D4E5F02 /* HopImportView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6C7D8E9F0A1B2C3D4E5F601 /* HopImportView.swift */; };
 		A5B6C7D8E9F0A1B2C3D4E5F03 /* DeployServerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6C7D8E9F0A1B2C3D4E5F602 /* DeployServerView.swift */; };
+		A5B6C7D8E9F0A1B2C3D4E5F0B /* AddServerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6C7D8E9F0A1B2C3D4E5F609 /* AddServerView.swift */; };
 		A5B6C7D8E9F0A1B2C3D4E5F04 /* DeploySSHKey.swift in Sources */ = {isa = PBXBuildFile; fileRef = B6C7D8E9F0A1B2C3D4E5F603 /* DeploySSHKey.swift */; };
 		A2B3C4D5E6F708192A3B4C02 /* KeyLibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4D5E6F708192A3B4C01 /* KeyLibraryView.swift */; };
 		A2B3C4D5E6F708192A3B4C04 /* KeyDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2B3C4D5E6F708192A3B4C03 /* KeyDetailView.swift */; };
@@ -122,6 +123,7 @@
 		94522CBE338B3FB5B345A67D /* QRCodeScannerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QRCodeScannerView.swift; sourceTree = "<group>"; };
 		B6C7D8E9F0A1B2C3D4E5F601 /* HopImportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HopImportView.swift; sourceTree = "<group>"; };
 		B6C7D8E9F0A1B2C3D4E5F602 /* DeployServerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeployServerView.swift; sourceTree = "<group>"; };
+		B6C7D8E9F0A1B2C3D4E5F609 /* AddServerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddServerView.swift; sourceTree = "<group>"; };
 		A2B3C4D5E6F708192A3B4C01 /* KeyLibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyLibraryView.swift; sourceTree = "<group>"; };
 		A2B3C4D5E6F708192A3B4C03 /* KeyDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyDetailView.swift; sourceTree = "<group>"; };
 		A2B3C4D5E6F708192A3B4C05 /* KeyExportView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeyExportView.swift; sourceTree = "<group>"; };
@@ -187,6 +189,7 @@
 				94522CBE338B3FB5B345A67D /* QRCodeScannerView.swift */,
 				B6C7D8E9F0A1B2C3D4E5F601 /* HopImportView.swift */,
 				B6C7D8E9F0A1B2C3D4E5F602 /* DeployServerView.swift */,
+				B6C7D8E9F0A1B2C3D4E5F609 /* AddServerView.swift */,
 				A2B3C4D5E6F708192A3B4C01 /* KeyLibraryView.swift */,
 				A2B3C4D5E6F708192A3B4C03 /* KeyDetailView.swift */,
 				A2B3C4D5E6F708192A3B4C05 /* KeyExportView.swift */,
@@ -395,6 +398,7 @@
 				A03E48238429801DC59B2AEC /* QRCodeScannerView.swift in Sources */,
 				A5B6C7D8E9F0A1B2C3D4E5F02 /* HopImportView.swift in Sources */,
 				A5B6C7D8E9F0A1B2C3D4E5F03 /* DeployServerView.swift in Sources */,
+				A5B6C7D8E9F0A1B2C3D4E5F0B /* AddServerView.swift in Sources */,
 				A2B3C4D5E6F708192A3B4C02 /* KeyLibraryView.swift in Sources */,
 				A2B3C4D5E6F708192A3B4C04 /* KeyDetailView.swift in Sources */,
 				A2B3C4D5E6F708192A3B4C06 /* KeyExportView.swift in Sources */,
@@ -494,7 +498,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.0;
+				MARKETING_VERSION = 3.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aengix.hopper;
 				PRODUCT_NAME = Hopper;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -520,7 +524,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.0.0;
+				MARKETING_VERSION = 3.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aengix.hopper.tunnel;
 				PRODUCT_NAME = HopperExtension;
 				SKIP_INSTALL = YES;
@@ -551,7 +555,7 @@
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
-				MARKETING_VERSION = 3.0.0;
+				MARKETING_VERSION = 3.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aengix.hopper;
 				PRODUCT_NAME = Hopper;
 				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
@@ -577,7 +581,7 @@
 					"@executable_path/Frameworks",
 					"@executable_path/../../Frameworks",
 				);
-				MARKETING_VERSION = 3.0.0;
+				MARKETING_VERSION = 3.1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.aengix.hopper.tunnel;
 				PRODUCT_NAME = HopperExtension;
 				SKIP_INSTALL = YES;

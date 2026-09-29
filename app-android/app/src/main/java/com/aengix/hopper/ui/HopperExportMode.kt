@@ -31,6 +31,7 @@ enum class HopperImportMode {
 fun HopperImportButtons(
     enabled: Boolean = true,
     modifier: Modifier = Modifier,
+    onAddManually: (() -> Unit)? = null,
     onSelect: (HopperImportMode) -> Unit,
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -67,15 +68,53 @@ fun HopperImportButtons(
                 )
             }
         }
-        OutlinedButton(
-            onClick = { onSelect(HopperImportMode.Remote) },
-            enabled = enabled,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 8.dp)
-                .dPadActivate(enabled) { onSelect(HopperImportMode.Remote) },
-        ) {
-            Text("Import remotely")
+        if (onAddManually != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedButton(
+                    onClick = { onSelect(HopperImportMode.Remote) },
+                    enabled = enabled,
+                    modifier = Modifier
+                        .weight(1f)
+                        .dPadActivate(enabled) { onSelect(HopperImportMode.Remote) },
+                ) {
+                    Text(
+                        "Import remotely",
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                OutlinedButton(
+                    onClick = onAddManually,
+                    enabled = enabled,
+                    modifier = Modifier
+                        .weight(1f)
+                        .dPadActivate(enabled, onClick = onAddManually),
+                ) {
+                    Text(
+                        "Add manually",
+                        textAlign = TextAlign.Center,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        } else {
+            OutlinedButton(
+                onClick = { onSelect(HopperImportMode.Remote) },
+                enabled = enabled,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp)
+                    .dPadActivate(enabled) { onSelect(HopperImportMode.Remote) },
+            ) {
+                Text("Import remotely")
+            }
         }
     }
 }

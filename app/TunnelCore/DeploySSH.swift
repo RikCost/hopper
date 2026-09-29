@@ -15,21 +15,16 @@ enum DeploySSH {
         onLog: (@Sendable (String) -> Void)? = nil
     ) async throws -> String {
         let log = onLog ?? { _ in }
-        log("Connecting to \(user)@\(host):\(port)…")
-
-        let client: SSHClient
-        if let password {
-            client = try await connect(host: host, port: port, user: user, password: password)
-        } else {
-            client = try await connect(host: host, port: port, user: user, privateKeyPEM: privateKeyPEM)
-        }
-
+        let client = try await connectAndAuthorize(
+            host: host,
+            port: port,
+            user: user,
+            password: password,
+            privateKeyPEM: privateKeyPEM,
+            publicKeyLine: publicKeyLine,
+            onLog: log
+        )
         defer { Task { try? await client.close() } }
-
-        log("Ensuring deploy key is in authorized_keys…")
-        let authCmd = authorizedKeysCommand(publicKeyLine: publicKeyLine, host: host)
-        _ = try await HopSSH.runCommand(on: client, authCmd)
-        log("Deploy key authorized.")
 
         log("Running remote install…")
         let installCmd = installCommand(
@@ -38,6 +33,59 @@ enum DeploySSH {
             installDir: installDir
         )
         return try await HopSSH.runCommand(on: client, installCmd, onLine: log)
+    }
+
+    /// Connects (password or key), ensures the public key is in authorized_keys, then disconnects.
+    static func authorizeKey(
+        host: String,
+        port: Int,
+        user: String,
+        password: String?,
+        privateKeyPEM: String,
+        publicKeyLine: String,
+        onLog: (@Sendable (String) -> Void)? = nil
+    ) async throws {
+        let log = onLog ?? { _ in }
+        let client = try await connectAndAuthorize(
+            host: host,
+            port: port,
+            user: user,
+            password: password,
+            privateKeyPEM: privateKeyPEM,
+            publicKeyLine: publicKeyLine,
+            onLog: log
+        )
+        try? await client.close()
+    }
+
+    private static func connectAndAuthorize(
+        host: String,
+        port: Int,
+        user: String,
+        password: String?,
+        privateKeyPEM: String,
+        publicKeyLine: String,
+        onLog: @Sendable (String) -> Void
+    ) async throws -> SSHClient {
+        onLog("Connecting to \(user)@\(host):\(port)…")
+
+        let client: SSHClient
+        if let password {
+            client = try await connect(host: host, port: port, user: user, password: password)
+        } else {
+            client = try await connect(host: host, port: port, user: user, privateKeyPEM: privateKeyPEM)
+        }
+
+        onLog("Ensuring deploy key is in authorized_keys…")
+        let authCmd = authorizedKeysCommand(publicKeyLine: publicKeyLine, host: host)
+        do {
+            _ = try await HopSSH.runCommand(on: client, authCmd)
+        } catch {
+            try? await client.close()
+            throw error
+        }
+        onLog("Deploy key authorized.")
+        return client
     }
 
     private static func connect(host: String, port: Int, user: String, password: String) async throws -> SSHClient {

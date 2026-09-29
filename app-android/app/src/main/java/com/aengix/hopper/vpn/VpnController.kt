@@ -108,6 +108,10 @@ class VpnController(application: Application) : AndroidViewModel(application) {
         updateState { it.addDeployKey(key) }
     }
 
+    fun recordDeployKeyUse(id: String, server: HopNodeProfile) {
+        updateState { it.recordDeployKeyUse(id, server) }
+    }
+
     fun importDeployKey(key: com.aengix.hopper.model.DeploySSHKey) {
         updateState { it.importDeployKey(key) }
     }

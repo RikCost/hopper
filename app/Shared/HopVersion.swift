@@ -1,3 +1,4 @@
+import Citadel
 import Foundation
 
 struct VersionManifest: Codable, Equatable {
@@ -25,7 +26,7 @@ struct ServerVersionInfo: Codable, Equatable {
 }
 
 enum HopVersion {
-    static let minServerVersion = "2.0.0"
+    static let minServerVersion = "3.1.0"
     static let protocolVersion = 2
 
     static var appVersion: String {
@@ -95,12 +96,10 @@ enum VersionChecker {
 }
 
 enum VersionService {
-    static func fetchServerVersion(on hop: HopNodeProfile) async throws -> ServerVersionInfo {
+    static func fetchServerVersion(on client: SSHClient, hop: HopNodeProfile) async throws -> ServerVersionInfo {
         let install = hop.resolvedInstallDir
-        let cmd = "cd \(shellQuote(install)) && ./hopperctl configure --version-json"
-        let output = try await HopSSH.withSession(on: hop) { client in
-            try await HopSSH.runCommand(on: client, cmd)
-        }
+        let cmd = "cd \(ShellQuote.bashRemotePath(install)) && ./hopperctl configure --version-json"
+        let output = try await HopSSH.runCommand(on: client, cmd)
         guard let jsonLine = extractJSONLine(from: output),
               let data = jsonLine.data(using: .utf8)
         else {
@@ -109,12 +108,10 @@ enum VersionService {
         return try JSONDecoder().decode(ServerVersionInfo.self, from: data)
     }
 
-    static func updateServer(on hop: HopNodeProfile, to version: String) async throws {
+    static func updateServer(on client: SSHClient, hop: HopNodeProfile, to version: String) async throws {
         let install = hop.resolvedInstallDir
-        let cmd = "cd \(shellQuote(install)) && ./hopperctl update --update --to \(shellQuote(version)) --json-only"
-        _ = try await HopSSH.withSession(on: hop) { client in
-            try await HopSSH.runCommand(on: client, cmd)
-        }
+        let cmd = "cd \(ShellQuote.bashRemotePath(install)) && ./hopperctl update --update --to \(shellQuote(version)) --json-only"
+        _ = try await HopSSH.runCommand(on: client, cmd)
     }
 
     private static func shellQuote(_ value: String) -> String {

@@ -14,7 +14,7 @@ import (
 	"github.com/aengix/hopper/server/internal/log"
 )
 
-var version = "2.0.1"
+var version = "3.1.0"
 
 func main() {
 	checkOnly := flag.Bool("check", false, "verify binary runs and exit")
@@ -100,9 +100,13 @@ func main() {
 	sigCh := make(chan os.Signal, 2)
 	signal.Notify(sigCh, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM)
 
+	reverseStop := make(chan struct{})
+	srv.StartReverseDialer(reverseStop)
+
 	go func() {
 		sig := <-sigCh
 		log.Warnf("hopperd signal %v — shutting down", sig)
+		close(reverseStop)
 		_ = ln.Close()
 		os.Exit(0)
 	}()
@@ -111,6 +115,7 @@ func main() {
 		go func() {
 			n, err := io.Copy(io.Discard, os.Stdin)
 			log.Warnf("hopperd stdin closed (read %d bytes): %v", n, err)
+			close(reverseStop)
 			_ = ln.Close()
 		}()
 	}

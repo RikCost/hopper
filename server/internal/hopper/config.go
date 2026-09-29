@@ -24,13 +24,17 @@ const (
 	ViaTun     = "tun"
 )
 
-type NextHop struct {
-	Host        string `json:"host"`
-	Port        int    `json:"port"`
-	User        string `json:"user"`
-	KeyPath     string `json:"key_path"`
-	TunnelPort  int    `json:"tunnel_port"`
+// HopSSH is SSH reachability to another hop (used as upstream for reverse dials).
+type HopSSH struct {
+	Host       string `json:"host"`
+	Port       int    `json:"port"`
+	User       string `json:"user"`
+	KeyPath    string `json:"key_path"`
+	TunnelPort int    `json:"tunnel_port"`
 }
+
+// NextHop is kept as an alias for older configs that still use "next".
+type NextHop = HopSSH
 
 type Route struct {
 	Dest string `json:"dest"`
@@ -38,18 +42,24 @@ type Route struct {
 }
 
 type Config struct {
-	ChainID            string   `json:"chain_id"`
-	Addr               string   `json:"addr"`
-	ClientPool         string   `json:"client_pool"`
-	ClientLeaseTTLSec  int      `json:"client_lease_ttl_sec"`
-	Overlay            string   `json:"overlay"`
-	TUN                string   `json:"tun"`
-	ListenHost         string   `json:"listen_host"`
-	ListenPort         int      `json:"listen_port"`
-	Next               *NextHop `json:"next"`
-	Routes             []Route  `json:"routes"`
-	NAT                bool     `json:"nat"`
-	ChainDir           string   `json:"-"`
+	ChainID           string  `json:"chain_id"`
+	Addr              string  `json:"addr"`
+	ClientPool        string  `json:"client_pool"`
+	ClientLeaseTTLSec int     `json:"client_lease_ttl_sec"`
+	Overlay           string  `json:"overlay"`
+	TUN               string  `json:"tun"`
+	ListenHost        string  `json:"listen_host"`
+	ListenPort        int     `json:"listen_port"`
+	Upstream *HopSSH `json:"upstream"`
+	// Downstream is the next hop; entry/relay may dial it when sticky says so
+	// (e.g. opposite chain order when only this host can reach the peer).
+	Downstream *HopSSH `json:"downstream"`
+	// Next is legacy forward-dial config; migrated to Downstream + AwaitReverse.
+	Next         *HopSSH `json:"next"`
+	AwaitReverse bool    `json:"await_reverse"`
+	Routes       []Route `json:"routes"`
+	NAT          bool    `json:"nat"`
+	ChainDir     string  `json:"-"`
 }
 
 func LoadConfig(path string) (Config, error) {
@@ -93,30 +103,55 @@ func (c Config) withDefaults() Config {
 	if c.ClientLeaseTTLSec <= 0 {
 		c.ClientLeaseTTLSec = DefaultClientLeaseTTL
 	}
-	if c.Next != nil {
-		if c.Next.Port == 0 {
-			c.Next.Port = 22
-		}
-		if c.Next.TunnelPort == 0 {
-			c.Next.TunnelPort = DefaultListenPort
-		}
-		if c.Next.KeyPath == "" {
-			c.Next.KeyPath = DefaultKeyPath
-		}
-		c.Next.KeyPath = expandHome(c.Next.KeyPath)
+	if c.Upstream == nil && c.Downstream == nil && c.Next != nil && strings.TrimSpace(c.Next.Host) != "" {
+		// Legacy "next" meant forward-dial target (downstream peer).
+		c.Downstream = c.Next
+		c.AwaitReverse = true
+		c.Next = nil
 	}
-	if !c.HasNext() && !c.NAT {
+	c.Upstream = normalizeHopSSH(c.Upstream)
+	c.Downstream = normalizeHopSSH(c.Downstream)
+	c.Next = normalizeHopSSH(c.Next)
+	if !c.HasUpstream() && !c.AwaitReverse && !c.NAT {
 		c.NAT = true
 	}
 	return c
 }
 
+func normalizeHopSSH(h *HopSSH) *HopSSH {
+	if h == nil {
+		return nil
+	}
+	if strings.TrimSpace(h.Host) == "" {
+		return nil
+	}
+	if h.Port == 0 {
+		h.Port = 22
+	}
+	if h.TunnelPort == 0 {
+		h.TunnelPort = DefaultListenPort
+	}
+	if h.KeyPath == "" {
+		h.KeyPath = DefaultKeyPath
+	}
+	h.KeyPath = expandHome(h.KeyPath)
+	return h
+}
+
+func (c Config) HasUpstream() bool {
+	return c.Upstream != nil && strings.TrimSpace(c.Upstream.Host) != ""
+}
+
+func (c Config) HasDownstream() bool {
+	return c.Downstream != nil && strings.TrimSpace(c.Downstream.Host) != ""
+}
+
 func (c Config) HasNext() bool {
-	return c.Next != nil && strings.TrimSpace(c.Next.Host) != ""
+	return c.AwaitReverse
 }
 
 func (c Config) Mode() string {
-	if c.HasNext() {
+	if c.AwaitReverse {
 		return "relay"
 	}
 	return "exit"
@@ -138,7 +173,7 @@ func (c Config) EffectiveRoutes() []Route {
 	if c.Addr != "" {
 		routes = append(routes, Route{Dest: c.Addr + "/32", Via: ViaTun})
 	}
-	if c.HasNext() {
+	if c.AwaitReverse {
 		routes = append(routes, Route{Dest: "0.0.0.0/0", Via: ViaNext})
 	} else {
 		routes = append(routes, Route{Dest: "0.0.0.0/0", Via: ViaTun})

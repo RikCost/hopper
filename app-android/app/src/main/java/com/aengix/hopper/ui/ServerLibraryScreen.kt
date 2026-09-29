@@ -52,6 +52,7 @@ fun ServerLibraryScreen(
     var importMode by remember { mutableStateOf<HopperImportMode?>(null) }
     var showScanner by remember { mutableStateOf(false) }
     var showDeploy by remember { mutableStateOf(false) }
+    var showAddManual by remember { mutableStateOf(false) }
     var serverToDelete by remember { mutableStateOf<HopNodeProfile?>(null) }
 
     if (importMode == HopperImportMode.Remote) {
@@ -102,14 +103,15 @@ fun ServerLibraryScreen(
         ) {
             HopperImportButtons(
                 modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                onAddManually = { showAddManual = true },
                 onSelect = { importMode = it },
             )
             if (displayedServers.isEmpty()) {
                 Text(
                     if (isPickMode) {
-                        "No servers — deploy a server, scan a QR code, or import a .hopperconf file, then tap to add to this chain."
+                        "No servers — add one manually, deploy, scan a QR code, or import a .hopperconf file, then tap to add to this chain."
                     } else {
-                        "No servers — deploy a server, scan a QR code, or import a .hopperconf file."
+                        "No servers — add one manually, deploy, scan a QR code, or import a .hopperconf file."
                     },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(horizontal = 16.dp),
@@ -161,6 +163,13 @@ fun ServerLibraryScreen(
             vpn = vpn,
             onDismiss = { showDeploy = false },
             onError = vpn::setError,
+        )
+    }
+
+    if (showAddManual) {
+        AddServerDialog(
+            vpn = vpn,
+            onDismiss = { showAddManual = false },
         )
     }
 

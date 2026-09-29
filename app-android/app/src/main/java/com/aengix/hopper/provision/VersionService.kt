@@ -3,6 +3,7 @@ package com.aengix.hopper.provision
 import com.aengix.hopper.model.HopNodeProfile
 import com.aengix.hopper.model.ServerVersionInfo
 import com.aengix.hopper.ssh.HopSSH
+import com.aengix.hopper.util.ShellQuote
 import kotlinx.serialization.json.Json
 
 object VersionService {
@@ -10,7 +11,7 @@ object VersionService {
 
     fun fetchServerVersion(hop: HopNodeProfile): ServerVersionInfo {
         val install = hop.resolvedInstallDir
-        val cmd = "cd ${shellQuote(install)} && ./hopperctl configure --version-json"
+        val cmd = "cd ${ShellQuote.bashRemotePath(install)} && ./hopperctl configure --version-json"
         val output = HopSSH.withSession(hop) { client ->
             HopSSH.runCommand(client, cmd)
         }
@@ -21,7 +22,7 @@ object VersionService {
 
     fun updateServer(hop: HopNodeProfile, version: String) {
         val install = hop.resolvedInstallDir
-        val cmd = "cd ${shellQuote(install)} && ./hopperctl update --update --to ${shellQuote(version)} --json-only"
+        val cmd = "cd ${ShellQuote.bashRemotePath(install)} && ./hopperctl update --update --to ${shellQuote(version)} --json-only"
         HopSSH.withSession(hop) { client ->
             HopSSH.runCommand(client, cmd)
         }
@@ -29,15 +30,14 @@ object VersionService {
 
     fun fetchChainStatus(hop: HopNodeProfile, chainId: String): com.aengix.hopper.model.ChainStatusReport {
         val install = hop.resolvedInstallDir
-        val cmd = "cd ${shellQuote(install)} && ./hopperctl status --chain-id ${shellQuote(chainId)}"
+        val cmd = "cd ${ShellQuote.bashRemotePath(install)} && ./hopperctl status --chain-id ${shellQuote(chainId)}"
         val output = HopSSH.withSession(hop) { client ->
             HopSSH.runCommand(client, cmd)
         }
         return json.decodeFromString(output.trim())
     }
 
-    private fun shellQuote(value: String): String =
-        "'" + value.replace("'", "'\\''") + "'"
+    private fun shellQuote(value: String): String = ShellQuote.bashSingle(value)
 
     private fun extractJsonLine(output: String): String? =
         output.lineSequence()

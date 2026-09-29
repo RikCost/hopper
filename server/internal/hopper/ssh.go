@@ -11,7 +11,28 @@ import (
 	"github.com/aengix/hopper/server/internal/log"
 )
 
+const nextHopDialTimeout = 20 * time.Second
+
 func dialNextHop(next NextHop) (net.Conn, error) {
+	addr := fmt.Sprintf("%s:%d", next.Host, next.Port)
+	type outcome struct {
+		conn net.Conn
+		err  error
+	}
+	ch := make(chan outcome, 1)
+	go func() {
+		conn, err := dialNextHopOnce(next)
+		ch <- outcome{conn, err}
+	}()
+	select {
+	case out := <-ch:
+		return out.conn, out.err
+	case <-time.After(nextHopDialTimeout):
+		return nil, fmt.Errorf("ssh dial %s timed out after %s", addr, nextHopDialTimeout)
+	}
+}
+
+func dialNextHopOnce(next NextHop) (net.Conn, error) {
 	keyBytes, err := os.ReadFile(next.KeyPath)
 	if err != nil {
 		return nil, fmt.Errorf("read key %s: %w", next.KeyPath, err)
@@ -25,15 +46,24 @@ func dialNextHop(next NextHop) (net.Conn, error) {
 	addr := fmt.Sprintf("%s:%d", next.Host, next.Port)
 	log.Infof("ssh connect %s@%s", next.User, addr)
 
-	client, err := ssh.Dial("tcp", addr, &ssh.ClientConfig{
+	raw, err := net.DialTimeout("tcp", addr, 10*time.Second)
+	if err != nil {
+		return nil, fmt.Errorf("tcp dial %s: %w", addr, err)
+	}
+	deadline := time.Now().Add(nextHopDialTimeout)
+	_ = raw.SetDeadline(deadline)
+
+	clientConn, chans, reqs, err := ssh.NewClientConn(raw, addr, &ssh.ClientConfig{
 		User:            next.User,
 		Auth:            []ssh.AuthMethod{ssh.PublicKeys(signer)},
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
-		Timeout:         15 * time.Second,
+		Timeout:         nextHopDialTimeout,
 	})
 	if err != nil {
+		_ = raw.Close()
 		return nil, fmt.Errorf("ssh dial %s: %w", addr, err)
 	}
+	client := ssh.NewClient(clientConn, chans, reqs)
 
 	tunnelPort := next.TunnelPort
 	if tunnelPort == 0 {
@@ -42,7 +72,7 @@ func dialNextHop(next NextHop) (net.Conn, error) {
 	target := fmt.Sprintf("%s:%d", DefaultListenHost, tunnelPort)
 	log.Infof("ssh forward -> %s", target)
 
-	channel, reqs, err := client.Conn.OpenChannel("direct-tcpip", ssh.Marshal(struct {
+	channel, chanReqs, err := client.Conn.OpenChannel("direct-tcpip", ssh.Marshal(struct {
 		Raddr string
 		Rport uint32
 		Laddr string
@@ -57,7 +87,10 @@ func dialNextHop(next NextHop) (net.Conn, error) {
 		_ = client.Close()
 		return nil, fmt.Errorf("open direct-tcpip %s: %w", target, err)
 	}
-	go ssh.DiscardRequests(reqs)
+	go ssh.DiscardRequests(chanReqs)
+
+	// Long-lived tunnel: clear the dial deadline.
+	_ = raw.SetDeadline(time.Time{})
 
 	return &sshConn{Channel: channel, client: client}, nil
 }

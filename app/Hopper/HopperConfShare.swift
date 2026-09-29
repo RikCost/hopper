@@ -26,6 +26,7 @@ enum HopperImportMode: String, Identifiable {
 
 struct HopperImportButtons: View {
     var enabled: Bool = true
+    var onAddManually: (() -> Void)? = nil
     let onSelect: (HopperImportMode) -> Void
 
     var body: some View {
@@ -34,10 +35,23 @@ struct HopperImportButtons: View {
                 importButton("Import from file", mode: .file)
                 importButton("Import from copy&paste", mode: .paste)
             }
-            Button("Import remotely") { onSelect(.remote) }
-                .buttonStyle(.bordered)
-                .disabled(!enabled)
-                .frame(maxWidth: .infinity)
+            if let onAddManually {
+                HStack(spacing: 12) {
+                    Button("Import remotely") { onSelect(.remote) }
+                        .buttonStyle(.bordered)
+                        .disabled(!enabled)
+                        .frame(maxWidth: .infinity)
+                    Button("Add manually") { onAddManually() }
+                        .buttonStyle(.bordered)
+                        .disabled(!enabled)
+                        .frame(maxWidth: .infinity)
+                }
+            } else {
+                Button("Import remotely") { onSelect(.remote) }
+                    .buttonStyle(.bordered)
+                    .disabled(!enabled)
+                    .frame(maxWidth: .infinity)
+            }
         }
     }
 

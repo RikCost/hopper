@@ -202,6 +202,8 @@ object SSHHopConnector {
         TunnelLog.info("SSH connect to ${entry.trimmedUser}@${entry.trimmedHost}:${entry.port}")
         val sshClient = HopSSH.connect(entry, onProtect)
         Thread.sleep(300)
+        // Fail channel/assign hangs faster than the default 60s SSH timeout.
+        sshClient.timeout = 20_000
 
         val chainStream = openChainStream(sshClient, hopperPort)
         return SSHHopSession(sshClient, chainStream)
@@ -211,9 +213,10 @@ object SSHHopConnector {
         var lastError: Throwable? = null
         repeat(6) { attempt ->
             if (attempt > 0) Thread.sleep(300)
-            TunnelLog.info("Opening hopper stream to 127.0.0.1:$hopperPort (attempt ${attempt + 1})")
+                TunnelLog.info("Opening hopper stream to 127.0.0.1:$hopperPort (attempt ${attempt + 1})")
             try {
                 val connection = sshClient.newDirectConnection("127.0.0.1", hopperPort)
+                TunnelLog.info("Hopper stream open to 127.0.0.1:$hopperPort")
                 return SSHByteStream(connection)
             } catch (error: Throwable) {
                 lastError = error

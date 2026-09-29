@@ -14,10 +14,12 @@ const (
 )
 
 const (
-	TypeData       byte = 1
-	TypeKeepalive  byte = 2
-	TypeAssignReq  byte = 3
-	TypeAssignResp byte = 4
+	TypeData         byte = 1
+	TypeKeepalive    byte = 2
+	TypeAssignReq    byte = 3
+	TypeAssignResp   byte = 4
+	TypeReverseOffer byte = 5
+	TypeReverseAck   byte = 6
 )
 
 var (
@@ -58,7 +60,7 @@ func ReadFrame(r io.Reader) (Frame, error) {
 			return Frame{}, err
 		}
 		frame.Payload = buf
-	case TypeKeepalive, TypeAssignReq, TypeAssignResp:
+	case TypeKeepalive, TypeAssignReq, TypeAssignResp, TypeReverseOffer, TypeReverseAck:
 		if payloadLen > 0 {
 			buf := make([]byte, payloadLen)
 			if _, err := io.ReadFull(r, buf); err != nil {
@@ -81,7 +83,7 @@ func WriteFrame(w io.Writer, frame Frame) error {
 		}
 	case TypeKeepalive:
 		frame.Payload = nil
-	case TypeAssignReq, TypeAssignResp:
+	case TypeAssignReq, TypeAssignResp, TypeReverseOffer, TypeReverseAck:
 		if len(frame.Payload) > MaxPacketLen {
 			return ErrPacketLimit
 		}

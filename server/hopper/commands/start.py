@@ -24,10 +24,14 @@ def run_start(args: list[str]) -> int:
     role = ""
     addr = ""
     index: int | None = None
-    next_host = ""
-    next_port = 22
-    next_user = ""
-    next_tunnel_port = 0
+    upstream_host = ""
+    upstream_port = 22
+    upstream_user = ""
+    upstream_tunnel_port = 0
+    downstream_host = ""
+    downstream_port = 22
+    downstream_user = ""
+    downstream_tunnel_port = 0
     trust_pubkey_str = ""
     trust_only = False
     stop_only = False
@@ -48,18 +52,33 @@ def run_start(args: list[str]) -> int:
         elif a == "--index":
             i += 1
             index = int(args[i])
-        elif a == "--next-host":
+        elif a == "--upstream-host":
             i += 1
-            next_host = args[i]
-        elif a == "--next-port":
+            upstream_host = args[i]
+        elif a == "--upstream-port":
             i += 1
-            next_port = int(args[i])
-        elif a == "--next-user":
+            upstream_port = int(args[i])
+        elif a == "--upstream-user":
             i += 1
-            next_user = args[i]
-        elif a == "--next-tunnel-port":
+            upstream_user = args[i]
+        elif a == "--upstream-tunnel-port":
             i += 1
-            next_tunnel_port = int(args[i])
+            upstream_tunnel_port = int(args[i])
+        elif a == "--downstream-host":
+            i += 1
+            downstream_host = args[i]
+        elif a == "--downstream-port":
+            i += 1
+            downstream_port = int(args[i])
+        elif a == "--downstream-user":
+            i += 1
+            downstream_user = args[i]
+        elif a == "--downstream-tunnel-port":
+            i += 1
+            downstream_tunnel_port = int(args[i])
+        elif a in ("--next-host", "--next-port", "--next-user", "--next-tunnel-port"):
+            i += 1
+            _ = args[i]
         elif a == "--trust-pubkey":
             i += 1
             trust_pubkey_str = args[i]
@@ -74,12 +93,12 @@ def run_start(args: list[str]) -> int:
             i += 1
             os.environ["HOPPER_DIR"] = str(Path(args[i]).expanduser().resolve())
         elif a == "--overlay":
-            i += 1  # ignored; overlay is derived from chain-id
+            i += 1
         elif a in ("-h", "--help"):
             print(
                 "Usage: hopper start --chain-id UUID --role exit|relay --addr A.B.C.D --index N "
-                "[--next-host H --next-port P --next-user U --next-tunnel-port P] "
-                "[--trust-pubkey 'ssh-ed25519 AAAA...'] [--trust-only] [--stop-only] [--if-running skip]",
+                "[--upstream-host H ...] [--downstream-host H ...] "
+                "[--trust-pubkey '...'] [--trust-only] [--stop-only] [--if-running skip]",
                 file=sys.stderr,
             )
             return 2
@@ -116,19 +135,25 @@ def run_start(args: list[str]) -> int:
     stop_chain_daemon(ctx)
 
     if role == "exit":
-        pass
+        if index > 0 and (not upstream_host or not upstream_user):
+            die("exit hop after entry requires --upstream-host and --upstream-user")
     elif role == "relay":
-        if not next_host or not next_user:
-            die("relay node requires --next-host and --next-user")
+        if index > 0 and (not upstream_host or not upstream_user):
+            die("relay hop requires --upstream-host and --upstream-user")
     else:
         die("role must be exit or relay")
 
     write_hopper_config(
         ctx, role, addr,
-        next_host=next_host,
-        next_port=next_port,
-        next_user=next_user,
-        next_tunnel_port=next_tunnel_port,
+        index=index,
+        upstream_host=upstream_host,
+        upstream_port=upstream_port,
+        upstream_user=upstream_user,
+        upstream_tunnel_port=upstream_tunnel_port,
+        downstream_host=downstream_host,
+        downstream_port=downstream_port,
+        downstream_user=downstream_user,
+        downstream_tunnel_port=downstream_tunnel_port,
     )
 
     if role == "exit":

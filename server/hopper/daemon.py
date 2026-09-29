@@ -263,31 +263,48 @@ def write_hopper_config(
     ctx: ChainContext,
     role: str,
     addr: str,
-    next_host: str = "",
-    next_port: int = 22,
-    next_user: str = "",
-    next_tunnel_port: int = 0,
+    index: int = 0,
+    upstream_host: str = "",
+    upstream_port: int = 22,
+    upstream_user: str = "",
+    upstream_tunnel_port: int = 0,
+    downstream_host: str = "",
+    downstream_port: int = 22,
+    downstream_user: str = "",
+    downstream_tunnel_port: int = 0,
 ) -> None:
     octet = ctx.overlay_cidr.split(".")[2]
     cfg: dict = {
         "chain_id": ctx.chain_id,
         "addr": addr,
         "overlay": ctx.overlay_cidr,
-        "client_pool": f"10.64.{octet}.2/24",
-        "client_lease_ttl_sec": 3600,
         "tun": ctx.tun_name,
         "listen_host": "127.0.0.1",
         "listen_port": ctx.listen_port,
     }
+    # Only the entry hop (index 0) assigns overlay client addresses.
+    if index == 0:
+        cfg["client_pool"] = f"10.64.{octet}.2/24"
+        cfg["client_lease_ttl_sec"] = 3600
     if role == "exit":
         cfg["nat"] = True
-    elif next_host:
-        cfg["next"] = {
-            "host": next_host,
-            "port": next_port,
-            "user": next_user,
+    else:
+        cfg["await_reverse"] = True
+    if upstream_host:
+        cfg["upstream"] = {
+            "host": upstream_host,
+            "port": upstream_port,
+            "user": upstream_user,
             "key_path": str(Path.home() / ".hopper" / "id_ed25519"),
-            "tunnel_port": next_tunnel_port or ctx.listen_port,
+            "tunnel_port": upstream_tunnel_port or ctx.listen_port,
+        }
+    if downstream_host:
+        cfg["downstream"] = {
+            "host": downstream_host,
+            "port": downstream_port,
+            "user": downstream_user,
+            "key_path": str(Path.home() / ".hopper" / "id_ed25519"),
+            "tunnel_port": downstream_tunnel_port or ctx.listen_port,
         }
     ctx.hopper_config.write_text(json.dumps(cfg, indent=2) + "\n")
 
